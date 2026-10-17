@@ -30,6 +30,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
+        self.wfile.write(b"Telegram Caption Userbot is Active and Running 24/7!")
     
     def log_message(self, format, *args):
         # Silence access logs to keep terminal output clean
