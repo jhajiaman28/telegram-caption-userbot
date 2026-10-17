@@ -3,7 +3,7 @@ import logging
 import mimetypes
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import requests
 
 logger = logging.getLogger("gemini_captioner")
@@ -11,11 +11,20 @@ logger = logging.getLogger("gemini_captioner")
 class GeminiCaptioner:
     """
     Multimodal Video Caption Generator using Google Gemini File API & generateContent.
-    Uses pure HTTP requests so it requires zero heavy wheels and runs seamlessly anywhere.
+    Features automatic model fallback (gemini-2.0-flash, gemini-1.5-flash-latest, etc.)
+    and resilient error handling.
     """
     UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-    GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    
+    CANDIDATE_MODELS = [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-002",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2.5-flash"
+    ]
 
     SYSTEM_PROMPT = """
 You are an expert social media strategist and content editor specializing in spiritual, philosophical (Bhagavad Gita, Vedanta), and wisdom-based short-form video content.
@@ -64,13 +73,13 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
         display_name = os.path.basename(file_path)
         logger.info(f"Initiating Gemini upload for '{display_name}' ({file_size / (1024*1024):.2f} MB)...")
 
-        # Step 1: Start resumable upload session
         headers = {
             "X-Goog-Upload-Protocol": "resumable",
             "X-Goog-Upload-Command": "start",
             "X-Goog-Upload-Header-Content-Length": str(file_size),
             "X-Goog-Upload-Header-Content-Type": mime_type,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key
         }
         metadata = {"file": {"display_name": display_name}}
         start_res = requests.post(
@@ -85,7 +94,6 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
         if not upload_url:
             raise RuntimeError("Failed to obtain Gemini resumable upload URL.")
 
-        # Step 2: Stream bytes to upload URL
         upload_headers = {
             "Content-Length": str(file_size),
             "X-Goog-Upload-Offset": "0",
@@ -100,7 +108,6 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
         file_name = file_info.get("name")
         logger.info(f"Uploaded successfully. File URI: {file_uri}, Name: {file_name}")
 
-        # Step 3: Wait until processing state is ACTIVE
         self._wait_for_processing(file_name)
         return file_info
 
@@ -109,12 +116,12 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
         logger.info("Waiting for Gemini to process video frames and audio...")
         start_time = time.time()
         
-        # Ensure clean URL without duplicate 'files/files/' prefix
         clean_name = file_name if not file_name.startswith("files/") else file_name[6:]
         url = f"{self.FILES_BASE_URL}/files/{clean_name}?key={self.api_key}"
+        headers = {"x-goog-api-key": self.api_key}
 
         while time.time() - start_time < max_wait:
-            res = requests.get(url, timeout=30)
+            res = requests.get(url, headers=headers, timeout=30)
             res.raise_for_status()
             data = res.json()
             state = data.get("state")
@@ -127,7 +134,7 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
         logger.warning("Video processing wait timeout reached, proceeding to prompt.")
 
     def generate_captions(self, video_file_path: str, topic_context: str = "") -> str:
-        """Upload video, invoke Gemini, and return the 4 platform captions."""
+        """Upload video, invoke Gemini, and return the 4 platform captions with auto-fallback."""
         file_info = self._upload_video(video_file_path)
         file_uri = file_info.get("uri")
         mime_type = file_info.get("mimeType", "video/mp4")
@@ -156,20 +163,36 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
             }
         }
 
-        logger.info("Requesting caption generation from Gemini 1.5 Flash...")
-        response = requests.post(
-            f"{self.GENERATE_URL}?key={self.api_key}",
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=90
-        )
-        response.raise_for_status()
+        last_error = None
+        for model in self.CANDIDATE_MODELS:
+            generate_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+            headers = {
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key
+            }
+            logger.info(f"Attempting caption generation with model '{model}'...")
+            
+            try:
+                response = requests.post(generate_url, json=payload, headers=headers, timeout=90)
+                if response.status_code == 200:
+                    res_json = response.json()
+                    candidates = res_json.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        output_text = "".join([p.get("text", "") for p in parts]).strip()
+                        logger.info(f"Successfully generated captions using '{model}'!")
+                        return output_text
+                elif response.status_code == 404:
+                    logger.warning(f"Model '{model}' returned 404. Falling back to next model...")
+                    last_error = response.text
+                    continue
+                else:
+                    logger.error(f"Error from '{model}': {response.status_code} - {response.text}")
+                    last_error = response.text
+                    continue
+            except Exception as req_err:
+                logger.warning(f"Request failed for model '{model}': {req_err}")
+                last_error = str(req_err)
+                continue
 
-        res_json = response.json()
-        candidates = res_json.get("candidates", [])
-        if not candidates:
-            raise RuntimeError("No caption response generated by Gemini.")
-
-        parts = candidates[0].get("content", {}).get("parts", [])
-        output_text = "".join([p.get("text", "") for p in parts]).strip()
-        return output_text
+        raise RuntimeError(f"All candidate Gemini models failed to generate content. Details: {last_error}")
