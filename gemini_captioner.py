@@ -14,7 +14,7 @@ class GeminiCaptioner:
     Uses pure HTTP requests so it requires zero heavy wheels and runs seamlessly anywhere.
     """
     UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
-    FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/files"
+    FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
     SYSTEM_PROMPT = """
@@ -108,8 +108,13 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
         """Poll file state until Gemini has finished audio/video transcoding."""
         logger.info("Waiting for Gemini to process video frames and audio...")
         start_time = time.time()
+        
+        # Ensure clean URL without duplicate 'files/files/' prefix
+        clean_name = file_name if not file_name.startswith("files/") else file_name[6:]
+        url = f"{self.FILES_BASE_URL}/files/{clean_name}?key={self.api_key}"
+
         while time.time() - start_time < max_wait:
-            res = requests.get(f"{self.FILES_BASE_URL}/{file_name}?key={self.api_key}", timeout=30)
+            res = requests.get(url, timeout=30)
             res.raise_for_status()
             data = res.json()
             state = data.get("state")
