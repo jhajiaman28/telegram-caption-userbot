@@ -18,15 +18,11 @@ class GeminiCaptioner:
     FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     
 CANDIDATE_MODELS = [
-    "gemini-4-argon",
     "gemini-3.8-flash",
     "gemini-3.1-pro-preview",
     "gemini-3.5-flash-lite",
-    "gemini-3.1-deep-think",
-    "gemini-3.8-live",
-    "gemini-3.8-live-extended-thinking",
-    "gemini-nano-banana-2.1",
-    "gemini-3-pro-image"
+    "gemini-3-flash",
+    "gemini-4-argon"
 ]
 
 
