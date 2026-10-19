@@ -109,6 +109,7 @@ def init_userbot():
         active_processing_topics.add(topic_id)
         logger.info(f"Processing topic ID {topic_id} ('{topic_title}')...")
 
+        status_msg = None
         try:
             status_msg = await client.send_message(
                 chat,
@@ -117,7 +118,6 @@ def init_userbot():
                 reply_to=topic_id
             )
 
-            # If video message wasn't passed directly (e.g. triggered via rename), search recent messages
             if not target_video_msg:
                 async for msg in client.iter_messages(chat, reply_to=topic_id, limit=50):
                     if msg.video:
@@ -131,10 +131,11 @@ def init_userbot():
 
             if not target_video_msg:
                 logger.warning(f"No video found in topic thread {topic_id}.")
-                await status_msg.edit(
-                    "⚠️ <b>Notice:</b> [Final] was detected, but no video file was found in this topic thread.",
-                    parse_mode="html"
-                )
+                if status_msg:
+                    await status_msg.edit(
+                        "⚠️ <b>Notice:</b> [Final] was detected, but no video file was found in this topic thread.",
+                        parse_mode="html"
+                    )
                 return
 
             file_size_mb = 0
@@ -142,25 +143,32 @@ def init_userbot():
                 file_size_mb = target_video_msg.file.size / (1024 * 1024)
 
             logger.info(f"Video found (Message ID {target_video_msg.id}, Size: {file_size_mb:.2f} MB). Downloading...")
-            await status_msg.edit(
-                f"📥 <b>Downloading Video ({file_size_mb:.1f} MB)...</b>\n<i>High-speed MTProto cloud stream.</i>",
-                parse_mode="html"
-            )
-
-            video_path = await client.download_media(target_video_msg, file=config.download_dir)
-            if not video_path or not os.path.exists(video_path):
-                await status_msg.edit("❌ <b>Download Error:</b> Failed to download video file.", parse_mode="html")
-                return
-
-            try:
+            if status_msg:
                 await status_msg.edit(
-                    "🧠 <b>Analyzing Video with Gemini AI...</b>\n<i>Drafting 4 separate platform messages...</i>",
+                    f"📥 <b>Downloading Video ({file_size_mb:.1f} MB)...</b>\n<i>High-speed MTProto cloud stream.</i>",
                     parse_mode="html"
                 )
 
-                caption_blocks = captioner.generate_captions(video_path, topic_context=topic_title)
-                if isinstance(caption_blocks, str):
-                    caption_blocks = [b.strip() for b in caption_blocks.split("===SPLIT_MSG===") if b.strip()]
+            video_path = await client.download_media(target_video_msg, file=config.download_dir)
+            if not video_path or not os.path.exists(video_path):
+                if status_msg:
+                    await status_msg.edit("❌ <b>Download Error:</b> Failed to download video file.", parse_mode="html")
+                return
+
+            try:
+                if status_msg:
+                    await status_msg.edit(
+                        "🧠 <b>Analyzing Video with Gemini AI...</b>\n<i>Drafting 4 separate platform messages...</i>",
+                        parse_mode="html"
+                    )
+
+                raw_captions = captioner.generate_captions(video_path, topic_context=topic_title)
+                
+                # Robust split handling (works whether generate_captions returns str or list)
+                if isinstance(raw_captions, str):
+                    caption_blocks = [b.strip() for b in raw_captions.split("===SPLIT_MSG===") if b.strip()]
+                else:
+                    caption_blocks = raw_captions
 
                 for block in caption_blocks:
                     await client.send_message(
@@ -170,29 +178,30 @@ def init_userbot():
                     )
                     await asyncio.sleep(0.5)
 
-                await status_msg.delete()
+                if status_msg:
+                    await status_msg.delete()
                 logger.info(f"Successfully posted {len(caption_blocks)} separate caption messages for topic {topic_id}!")
 
-            except Exception as e:
-                logger.error(f"Error generating captions: {e}", exc_info=True)
-                await status_msg.edit(f"❌ <b>Caption Generation Failed:</b>\n<code>{e}</code>", parse_mode="html")
+            except Exception as gen_err:
+                logger.error(f"Error generating captions: {gen_err}", exc_info=True)
+                if status_msg:
+                    await status_msg.edit(f"❌ <b>Caption Generation Failed:</b>\n<code>{gen_err}</code>", parse_mode="html")
 
             finally:
                 if os.path.exists(video_path):
                     try:
                         os.remove(video_path)
                         logger.info(f"Cleaned up temp video file: {video_path}")
-                    except Exception as del_err:
-                        logger.warning(f"Could not delete temp file: {del_err}")
+                    except Exception:
+                        pass
 
+        except Exception as e:
+            logger.error(f"Unexpected error in process_topic_video: {e}", exc_info=True)
         finally:
             active_processing_topics.discard(topic_id)
 
     # --------------------------------------------------------------------------
-    # Event 1: NewMessage Listener
-    # Handles:
-    #   A) Video uploaded into an existing [Final] topic
-    #   B) Topic renamed service messages (MessageActionTopicEdit)
+    # Event 1: NewMessage Listener (Upload + Rename)
     # --------------------------------------------------------------------------
     @client.on(events.NewMessage)
     async def message_handler(event):
@@ -235,52 +244,21 @@ def init_userbot():
                 asyncio.create_task(process_topic_video(chat, topic_id, new_title))
 
     # --------------------------------------------------------------------------
-    # Event 2: Low-level Raw Update Listener (Fallback for Topic Rename)
-    # --------------------------------------------------------------------------
-    @client.on(events.Raw)
-    async def raw_handler(event):
-        updates_list = event.updates if hasattr(event, "updates") and isinstance(event.updates, list) else [event]
-
-        for upd in updates_list:
-            msg = getattr(upd, "message", None)
-            if msg and isinstance(msg, types.MessageService):
-                action = getattr(msg, "action", None)
-                if isinstance(action, types.MessageActionTopicEdit):
-                    new_title = action.title or ""
-                    if is_final_title(new_title):
-                        reply_hdr = getattr(msg, "reply_to", None)
-                        topic_id = None
-                        if reply_hdr:
-                            topic_id = getattr(reply_hdr, "reply_to_top_id", None) or getattr(reply_hdr, "reply_to_msg_id", None)
-                        if not topic_id:
-                            topic_id = msg.id
-
-                        peer = getattr(msg, "peer_id", None)
-                        if peer:
-                            try:
-                                chat = await client.get_entity(peer)
-                                logger.info(f"Triggering auto-captions via Raw for topic {topic_id} in {chat.id}")
-                                asyncio.create_task(process_topic_video(chat, topic_id, new_title))
-                            except Exception as entity_err:
-                                logger.error(f"Failed to resolve chat peer in raw handler: {entity_err}")
-
-    # --------------------------------------------------------------------------
-    # Event 3: Manual Command Shortcut (.final or /final inside the topic)
+    # Event 2: Manual Command Shortcut (.final or /final inside the topic)
     # --------------------------------------------------------------------------
     @client.on(events.NewMessage(pattern=r"(?i)^[./]final"))
     async def manual_trigger(event):
         if not event.is_group:
             return
 
+        chat = await event.get_chat()
         topic_id = None
         if event.message.reply_to:
             topic_id = getattr(event.message.reply_to, "reply_to_top_id", None) or getattr(event.message.reply_to, "reply_to_msg_id", None)
 
         if not topic_id:
-            await event.reply("⚠️ Please use this command inside a specific forum topic thread.")
-            return
+            topic_id = getattr(event.message, "reply_to_msg_id", None) or event.message.id
 
-        chat = await event.get_chat()
         logger.info(f"Manual .final trigger received in topic {topic_id}")
         asyncio.create_task(process_topic_video(chat, topic_id, "Manual Trigger"))
 
