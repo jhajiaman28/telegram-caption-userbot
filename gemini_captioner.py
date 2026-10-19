@@ -17,14 +17,12 @@ class GeminiCaptioner:
     UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     
-CANDIDATE_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-3.5-flash-lite",
-    "gemini-3-flash",
-    "gemini-4-argon"
-]
-
+    CANDIDATE_MODELS = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash"
+    ]
 
     SYSTEM_PROMPT = """
 You are an elite viral content strategist and philosophical editor (specializing in Bhagavad Gita, Vedanta, self-inquiry, and practical life wisdom).
