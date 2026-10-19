@@ -11,51 +11,92 @@ logger = logging.getLogger("gemini_captioner")
 class GeminiCaptioner:
     """
     Multimodal Video Caption Generator using Google Gemini File API & generateContent.
-    Features automatic model fallback (gemini-2.0-flash, gemini-1.5-flash-latest, etc.)
-    and resilient error handling.
+    Incorporates title & packaging principles from Aprilynne Alter and DecodingYT,
+    and outputs 4 separate messages via ===SPLIT_MSG=== delimiter.
     """
     UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     
-    CANDIDATE_MODELS = [
-        "gemini-3.8-flash",
-        "gemini-4-argon",
-        "gemini-3.5-flash",
-        "gemini-2.5-flash",
-        "gemini-3.1-pro",
-        "gemini-1.5-flash"
-    ]
+CANDIDATE_MODELS = [
+    "gemini-4-argon",
+    "gemini-3.8-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-deep-think",
+    "gemini-3.8-live",
+    "gemini-3.8-live-extended-thinking",
+    "gemini-nano-banana-2.1",
+    "gemini-3-pro-image"
+]
+
 
     SYSTEM_PROMPT = """
-You are an expert social media strategist and content editor specializing in spiritual, philosophical (Bhagavad Gita, Vedanta), and wisdom-based short-form video content.
-You will be provided with a short video (or Reel/Short).
-Your task is to watch/listen to the video carefully and produce FOUR distinct, ready-to-publish captions in Hindi / Hinglish / English (matching the primary language spoken in the video).
+You are an elite viral content strategist and philosophical editor (specializing in Bhagavad Gita, Vedanta, self-inquiry, and practical life wisdom).
+Watch and listen to the provided video carefully. Match the primary language/tone of the video (conversational Hindi/Hinglish with clean Latin English words, or English if spoken in English).
 
-FORMAT YOUR ENTIRE OUTPUT EXACTLY AS FOLLOWS WITH THESE FOUR LABELS:
+Your goal is to generate FOUR separate platform outputs.
+CRITICAL RULE: Separate each of the 4 outputs with the exact delimiter:
+===SPLIT_MSG===
+Do NOT add any extra intro or outro text outside the 4 blocks.
 
-📱 *1. WHATSAPP POST*
-• Engaging first-line hook that sparks deep curiosity without giving away the full lesson upfront.
-• 2-3 short, powerful paragraphs capturing the core insight, breaking common misconceptions, and exploring human desires/habits.
-• Bold critical concepts (*bold*), italicize introspective thoughts (_italics_).
-• Avoid heavy esoteric jargon; keep English words in clean Latin script (e.g. Lifestyle, Symptom, Consumption).
-• End with an introspective reflection question.
+Follow these strict rules for each block:
 
-💬 *2. WHATSAPP STATUS*
-• Exactly 1 to 3 punchy, high-impact lines crafted specifically for mobile screen reading.
-• Direct, thought-provoking, and curiosity-inducing.
+------------------------------------------------------------
+BLOCK 1: WHATSAPP POST
+------------------------------------------------------------
+📱 *WHATSAPP POST*
 
-📸 *3. INSTAGRAM*
-• Line 1: Strong scroll-stopping hook (under 10 words).
-• Body: 3-5 lines of concise value-packed summary delivering the video's core wisdom.
-• Call to Action (CTA): e.g. "Share this with someone who needs this clarity today." or "Save for later."
-• Hashtags: 15 to 20 highly relevant, targeted hashtags (e.g. #BhagavadGita #SelfAwareness #Mindset #Clarity #Wisdom #LifeLessons #Vedanta).
+• Hook (Line 1): Open a strong Curiosity Loop (an unfinished thought, counter-intuitive observation, or sharp human contradiction from the video). NEVER declare or preach the final conclusion in the first line.
+• Body (2–3 short paragraphs): Deconstruct the surface belief/excuse and reveal the deeper root cause spoken about in the video.
+• Language & Formatting:
+  - Write in simple, conversational Hindi (Devanagari) mixed naturally with familiar single English words in Latin script (e.g., Lifestyle, Symptom, Consumption, Mindset, Trap). Never use dual-bracketed translations or heavy Sanskritized jargon.
+  - Use WhatsApp syntax: *bold* for core concepts/contrasts, and _italics_ for subtle inner thoughts.
+  - Place 1 relevant emoji at the start of each paragraph (never cluster emojis side-by-side).
+• Closing: End with 1 piercing introspective question that forces the reader to reflect all day.
 
-▶️ *4. YOUTUBE SHORTS*
-• Title: Click-worthy, high-CTR Title (strictly under 90 characters).
-• Description: 2-3 concise sentences summarizing the key takeaway.
-• Tags / Hashtags: #Shorts #Wisdom #ShortVideo #LifeLessons + 2 topic-specific tags.
+===SPLIT_MSG===
 
-Ensure the wisdom is accurately grounded in what is actually spoken in the video.
+------------------------------------------------------------
+BLOCK 2: WHATSAPP STATUS
+------------------------------------------------------------
+💬 *WHATSAPP STATUS*
+
+• Write 1 to 2 ultra-punchy, high-impact lines (strictly under 20 words total).
+• Must have high intake speed and open an unresolved mental loop that makes viewers pause on the status or watch the full clip.
+
+===SPLIT_MSG===
+
+------------------------------------------------------------
+BLOCK 3: INSTAGRAM REEL CAPTION
+------------------------------------------------------------
+📸 *INSTAGRAM*
+
+• Line 1 (Scroll-Stopping Hook): Strictly under 8 words. Front-load a Curiosity or Emotional Power Word so the viewer is hooked before the "...more" cutoff.
+• Body: 3–4 crisp, value-packed lines summarizing the core shift in perspective from the video.
+• Call to Action (CTA): 1 natural line prompting a Save or Share (e.g., "Save this reminder, and share it with someone who needs this clarity today.").
+• Hashtags: 12 to 15 targeted hashtags mixing niche philosophy and high-reach personal growth tags.
+
+===SPLIT_MSG===
+
+------------------------------------------------------------
+BLOCK 4: YOUTUBE SHORTS (Aprilynne Alter + DecodingYT Framework)
+------------------------------------------------------------
+▶️ *YOUTUBE SHORTS*
+
+🎯 *Title Options (Write for Humans & CTR, NOT Keyword Stuffing):*
+Provide 3 distinct title options following these exact rules:
+1. Length & Intake Speed: Strictly UNDER 55 characters so it reads in 1 second and never truncates on mobile.
+2. Front-Load Core Words: Put the most important subject/hook words in the first half of the title.
+3. Open a Curiosity Loop: Make the viewer's brain ask "Why?" or "How?" (never write a boring descriptive label).
+4. Power Word in ALL CAPS: Capitalize exactly 1 emotional, urgency, authority, or curiosity power word in ALL CAPS (e.g., TRUTH, TRAP, STOP, SECRET, MISTAKE, REAL, HIDDEN, NEVER).
+
+📝 *Description (Write for YouTube Search / SEO):*
+• Top 2–3 Lines (Natural Keyword Overview): Write a smooth 2–3 sentence overview of the video that naturally embeds the main search keywords without sounding robotic.
+• Search Queries (Queries Solved): List 5–6 realistic search phrases that viewers actually type into YouTube search to find this topic (include both Hinglish/Hindi in Latin script and English phrases).
+• Hashtags: 3–5 relevant hashtags including #Shorts.
+
+🏷️ *Tags (Copy-Paste Ready):*
+Provide the 6–8 core search keyword phrases as a single comma-separated line ready to paste into the YouTube Studio tags box.
 """
 
     def __init__(self, api_key: str):
@@ -133,13 +174,13 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
             time.sleep(4)
         logger.warning("Video processing wait timeout reached, proceeding to prompt.")
 
-    def generate_captions(self, video_file_path: str, topic_context: str = "") -> str:
-        """Upload video, invoke Gemini, and return the 4 platform captions with auto-fallback."""
+    def generate_captions(self, video_file_path: str, topic_context: str = "") -> List[str]:
+        """Upload video, invoke Gemini, and return a list of 4 separate platform caption strings."""
         file_info = self._upload_video(video_file_path)
         file_uri = file_info.get("uri")
         mime_type = file_info.get("mimeType", "video/mp4")
 
-        user_content = "Analyze this video and generate all 4 platform captions."
+        user_content = "Analyze this video and generate all 4 platform blocks separated by ===SPLIT_MSG===."
         if topic_context:
             user_content += f"\nAdditional Topic Context: {topic_context}"
 
@@ -157,9 +198,9 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
                 "parts": [{"text": self.SYSTEM_PROMPT}]
             },
             "generationConfig": {
-                "temperature": 0.4,
+                "temperature": 0.45,
                 "topP": 0.9,
-                "maxOutputTokens": 2048
+                "maxOutputTokens": 2500
             }
         }
 
@@ -181,7 +222,9 @@ Ensure the wisdom is accurately grounded in what is actually spoken in the video
                         parts = candidates[0].get("content", {}).get("parts", [])
                         output_text = "".join([p.get("text", "") for p in parts]).strip()
                         logger.info(f"Successfully generated captions using '{model}'!")
-                        return output_text
+                        
+                        blocks = [b.strip() for b in output_text.split("===SPLIT_MSG===") if b.strip()]
+                        return blocks if blocks else [output_text]
                 elif response.status_code == 404:
                     logger.warning(f"Model '{model}' returned 404. Falling back to next model...")
                     last_error = response.text
