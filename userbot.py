@@ -2,8 +2,10 @@ import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import logging
 import os
+import shutil
 import sys
 import threading
+import time
 from telethon import TelegramClient, events, functions, types
 from telethon.sessions import StringSession
 from config import UserbotConfig
@@ -80,7 +82,15 @@ def init_userbot():
         return "[final]" in t or "(final)" in t or t.endswith(" final") or " final " in t
 
     async def get_topic_title(chat, topic_id: int) -> str:
-        """Fetch current topic title using GetForumTopicsByID with message fallback."""
+        if not topic_id:
+            return ""
+        try:
+            msg = await client.get_messages(chat, ids=topic_id)
+            if msg and hasattr(msg, "action") and hasattr(msg.action, "title"):
+                return msg.action.title
+        except Exception:
+            pass
+
         try:
             res = await client(functions.channels.GetForumTopicsByIDRequest(
                 channel=chat,
@@ -88,26 +98,29 @@ def init_userbot():
             ))
             if res and hasattr(res, "topics") and res.topics:
                 return res.topics[0].title
-        except Exception as e:
-            logger.debug(f"GetForumTopicsByID failed for topic {topic_id}: {e}")
-
-        try:
-            msg = await client.get_messages(chat, ids=topic_id)
-            if msg and hasattr(msg, "action") and hasattr(msg.action, "title"):
-                return msg.action.title
-        except Exception as e:
-            logger.debug(f"Fallback get_messages failed for topic {topic_id}: {e}")
+        except Exception:
+            pass
 
         return ""
 
+    def is_message_image(msg) -> bool:
+        if not msg:
+            return False
+        if msg.photo:
+            return True
+        if msg.media and hasattr(msg.media, "document"):
+            doc = msg.media.document
+            if hasattr(doc, "mime_type") and doc.mime_type.startswith("image/"):
+                return True
+        return False
+
     async def process_topic_video(chat, topic_id: int, topic_title: str, target_video_msg=None):
-        """Locates or accepts the video in the topic, downloads via MTProto, calls Gemini, and posts 4 separate messages."""
         if topic_id in active_processing_topics:
             logger.info(f"Topic {topic_id} is already being processed. Skipping duplicate trigger.")
             return
 
         active_processing_topics.add(topic_id)
-        logger.info(f"Processing topic ID {topic_id} ('{topic_title}')...")
+        logger.info(f"Processing video for topic ID {topic_id} ('{topic_title}')...")
 
         status_msg = None
         try:
@@ -164,7 +177,6 @@ def init_userbot():
 
                 raw_captions = captioner.generate_captions(video_path, topic_context=topic_title)
                 
-                # Robust split handling (works whether generate_captions returns str or list)
                 if isinstance(raw_captions, str):
                     caption_blocks = [b.strip() for b in raw_captions.split("===SPLIT_MSG===") if b.strip()]
                 else:
@@ -200,15 +212,77 @@ def init_userbot():
         finally:
             active_processing_topics.discard(topic_id)
 
+    async def process_topic_photos(chat, topic_id: int, topic_title: str, photo_messages: list):
+        if not photo_messages:
+            return
+
+        status_msg = None
+        temp_folder = os.path.join(config.download_dir, f"album_{topic_id}_{int(time.time())}")
+        os.makedirs(temp_folder, exist_ok=True)
+        downloaded_paths = []
+
+        try:
+            status_msg = await client.send_message(
+                chat,
+                f"⏳ <b>Found {len(photo_messages)} Photos!</b> Downloading & analyzing with Gemini AI...",
+                parse_mode="html",
+                reply_to=topic_id
+            )
+
+            for p_msg in photo_messages:
+                p_path = await client.download_media(p_msg, file=temp_folder)
+                if p_path and os.path.exists(p_path):
+                    downloaded_paths.append(p_path)
+
+            if not downloaded_paths:
+                if status_msg:
+                    await status_msg.edit("❌ <b>Download Error:</b> Failed to download photos.", parse_mode="html")
+                return
+
+            if status_msg:
+                await status_msg.edit(
+                    f"🧠 <b>Analyzing {len(downloaded_paths)} Photos with Gemini AI...</b>\n<i>Drafting unified album captions...</i>",
+                    parse_mode="html"
+                )
+
+            raw_captions = captioner.generate_multi_photo_captions(downloaded_paths, topic_context=topic_title)
+            
+            if isinstance(raw_captions, str):
+                caption_blocks = [b.strip() for b in raw_captions.split("===SPLIT_MSG===") if b.strip()]
+            else:
+                caption_blocks = raw_captions
+
+            reply_target_id = photo_messages[0].id
+            for block in caption_blocks:
+                await client.send_message(
+                    chat,
+                    block,
+                    reply_to=reply_target_id
+                )
+                await asyncio.sleep(0.5)
+
+            if status_msg:
+                await status_msg.delete()
+            logger.info(f"Successfully posted {len(caption_blocks)} photo album caption messages!")
+
+        except Exception as e:
+            logger.error(f"Error generating photo album captions: {e}", exc_info=True)
+            if status_msg:
+                await status_msg.edit(f"❌ <b>Photo Caption Generation Failed:</b>\n<code>{e}</code>", parse_mode="html")
+
+        finally:
+            if os.path.exists(temp_folder):
+                try:
+                    shutil.rmtree(temp_folder)
+                    logger.info(f"Cleaned up temp photo album folder: {temp_folder}")
+                except Exception:
+                    pass
+
     # --------------------------------------------------------------------------
-    # Event 1: NewMessage Listener (Upload + Rename)
+    # Event 1: NewMessage Listener (Video Upload + Topic Rename)
     # --------------------------------------------------------------------------
     @client.on(events.NewMessage)
     async def message_handler(event):
-        if not event.is_group:
-            return
-
-        # Case A: Video uploaded into a topic
         is_video = bool(
             event.message.video or (
                 event.message.media and hasattr(event.message.media, "document") and
@@ -227,7 +301,6 @@ def init_userbot():
                     asyncio.create_task(process_topic_video(chat, topic_id, topic_title, target_video_msg=event.message))
                     return
 
-        # Case B: Topic renamed service message
         action = getattr(event.message, "action", None)
         if isinstance(action, types.MessageActionTopicEdit):
             new_title = action.title or ""
@@ -244,13 +317,10 @@ def init_userbot():
                 asyncio.create_task(process_topic_video(chat, topic_id, new_title))
 
     # --------------------------------------------------------------------------
-    # Event 2: Manual Command Shortcut (.final or /final inside the topic)
+    # Event 2: Manual Command (.final / /final) for Single Video
     # --------------------------------------------------------------------------
     @client.on(events.NewMessage(pattern=r"(?i)^[./]final"))
     async def manual_trigger(event):
-        if not event.is_group:
-            return
-
         chat = await event.get_chat()
         topic_id = None
         if event.message.reply_to:
@@ -262,6 +332,71 @@ def init_userbot():
         logger.info(f"Manual .final trigger received in topic {topic_id}")
         asyncio.create_task(process_topic_video(chat, topic_id, "Manual Trigger"))
 
+    # --------------------------------------------------------------------------
+    # Event 3: Manual Command (.photos / .photo / .album / .images) for Multiple Photos
+    # --------------------------------------------------------------------------
+    @client.on(events.NewMessage(pattern=r"(?i)^[./](photos?|album|images?)(?:\s|$)"))
+    async def manual_photos_trigger(event):
+        chat = await event.get_chat()
+        topic_id = None
+        if event.message.reply_to:
+            topic_id = getattr(event.message.reply_to, "reply_to_top_id", None) or getattr(event.message.reply_to, "reply_to_msg_id", None)
+
+        if not topic_id:
+            topic_id = getattr(event.message, "reply_to_msg_id", None) or event.message.id
+
+        logger.info(f"Manual .photos command triggered in topic {topic_id}")
+        
+        # Immediate status acknowledgment so Telegram is never silent
+        ack_msg = await client.send_message(
+            chat,
+            "🔍 <b>Searching for photos in this topic...</b>",
+            parse_mode="html",
+            reply_to=topic_id
+        )
+
+        try:
+            topic_title = await get_topic_title(chat, topic_id) or "Photo Album"
+            reply_msg = await event.get_reply_message()
+            photo_messages = []
+
+            # 1. If replying directly to an album with a grouped_id, collect all photos with that grouped_id
+            if reply_msg and getattr(reply_msg, "grouped_id", None):
+                target_gid = reply_msg.grouped_id
+                async for m in client.iter_messages(chat, reply_to=topic_id, limit=40):
+                    if getattr(m, "grouped_id", None) == target_gid and is_message_image(m):
+                        photo_messages.append(m)
+            # 2. If replying directly to a single photo
+            elif reply_msg and is_message_image(reply_msg):
+                photo_messages.append(reply_msg)
+                async for m in client.iter_messages(chat, reply_to=topic_id, limit=20):
+                    if is_message_image(m) and m.id != reply_msg.id:
+                        photo_messages.append(m)
+                    if len(photo_messages) >= 10:
+                        break
+            # 3. If sent standalone in the topic thread, collect recent photos
+            else:
+                async for m in client.iter_messages(chat, reply_to=topic_id, limit=40):
+                    if is_message_image(m):
+                        photo_messages.append(m)
+                    if len(photo_messages) >= 10:
+                        break
+
+            if not photo_messages:
+                await ack_msg.edit(
+                    "⚠️ <b>No photos found:</b> Please use <code>.photos</code> in a topic that contains uploaded photos, or reply directly to a photo or album.",
+                    parse_mode="html"
+                )
+                return
+
+            await ack_msg.delete()
+            photo_messages.reverse()  # Chronological order
+            asyncio.create_task(process_topic_photos(chat, topic_id, topic_title, photo_messages))
+
+        except Exception as e:
+            logger.error(f"Error in manual_photos_trigger: {e}", exc_info=True)
+            await ack_msg.edit(f"❌ <b>Error:</b> <code>{e}</code>", parse_mode="html")
+
     return client
 
 if __name__ == "__main__":
@@ -270,5 +405,5 @@ if __name__ == "__main__":
     print("="*60)
     userbot = init_userbot()
     userbot.start()
-    print("\n🟢 Userbot is ONLINE and listening 24/7 for [Final] topics...")
+    print("\n🟢 Userbot is ONLINE and listening 24/7 for [Final] topics & .photos...")
     userbot.run_until_disconnected()
