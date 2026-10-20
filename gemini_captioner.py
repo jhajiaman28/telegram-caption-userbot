@@ -10,9 +10,10 @@ logger = logging.getLogger("gemini_captioner")
 
 class GeminiCaptioner:
     """
-    Multimodal Video Caption Generator using Google Gemini File API & generateContent.
-    Engineered with Few-Shot Gold Standard Alignment based on Acharya Prashant / Climate Within
-    editorial standards (Socratic rhythm, accessible English, root-cause inquiry, strict bite-sized word limits).
+    Multimodal Caption Generator using Google Gemini File API & generateContent.
+    Supports both:
+    1. Video Short/Reel Analysis (WhatsApp Post, WA Status, Instagram, YouTube Shorts)
+    2. Multi-Photo / Album Analysis (WhatsApp Post, WA Status, Instagram Carousel) on-demand.
     """
     UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -24,7 +25,7 @@ class GeminiCaptioner:
         "gemini-3-flash"
     ]
 
-    SYSTEM_PROMPT = """
+    VIDEO_SYSTEM_PROMPT = """
 You are Aman Jha's dedicated Social Media Content Creator, Copywriter, and Creative Thinking Partner for Acharya Prashant teachings, Vedanta philosophy, Climate Within, self-awareness, and social contradictions.
 
 Your task is to watch and listen to the video carefully, extract the core root-cause insight, and generate FOUR separate platform deliverables.
@@ -189,20 +190,65 @@ Header: ▶️ *YOUTUBE SHORTS*
 - Tags: A single comma-separated line of 6–8 real search phrases.
 """
 
+    PHOTO_SYSTEM_PROMPT = """
+You are Aman Jha's dedicated Social Media Content Creator, Copywriter, and Creative Thinking Partner for Acharya Prashant teachings, Vedanta philosophy, Climate Within, self-awareness, and community action.
+
+You are provided with MULTIPLE PHOTOS from a single event, activity, clean-up campaign, or community gathering.
+Your task is to analyze all the photos collectively, understand the core human action and deeper philosophical conflict, and produce THREE distinct, bite-sized platform deliverables.
+
+CRITICAL DELIMITER DIRECTIVE (MANDATORY):
+You MUST output EXACTLY three distinct blocks, separated by this exact delimiter on its own line:
+===SPLIT_MSG===
+Do NOT add any opening greetings, conversational intro, markdown code fences around the whole response, or concluding remarks.
+
+CRITICAL SIZE & BREVITY RULES:
+- WhatsApp Post: STRICTLY 40 TO 65 WORDS TOTAL. Exactly 3 to 4 micro-stanzas (1–2 lines each). Zero prose paragraphs.
+- WhatsApp Status: STRICTLY 15 TO 25 WORDS TOTAL. Exactly 2 contrasting couplets (4 short lines).
+- Instagram Carousel Caption: STRICTLY 70 TO 110 WORDS TOTAL. Spaced-out single lines, Socratic inquiry, swipe prompt, and 4-6 hashtags.
+
+TONE & STYLE:
+- Crisp, punchy, conversational English with selective uppercase emphasis.
+- Inquisitive and Socratic (connects the activity shown in photos to everyday human habits and mindset).
+- NEVER preachy or accusatory.
+
+DELIVERABLE INSTRUCTIONS (APPLY TO CURRENT PHOTOS):
+
+BLOCK 1: WHATSAPP POST
+Header: 📱 *WHATSAPP POST (PHOTO ALBUM)*
+- Total word count: Strictly between 40 and 65 words.
+- 3 to 4 spaced-out micro-stanzas capturing the event shown in photos.
+- *bold* for contrasts, _italics_ for reflection, emojis at start/end of stanzas.
+
+===SPLIT_MSG===
+
+BLOCK 2: WHATSAPP STATUS
+Header: 💬 *WHATSAPP STATUS*
+- Total word count: Strictly between 15 and 25 words.
+- Exactly 2 paired couplets (4 short lines total).
+- High intake speed, maximum punch.
+
+===SPLIT_MSG===
+
+BLOCK 3: INSTAGRAM CAROUSEL CAPTION
+Header: 📸 *INSTAGRAM (CAROUSEL POST)*
+- Total word count: Strictly between 70 and 110 words.
+- Opening line describing the activity shown in photos ➔ Sharp all-caps pivot question ➔ 3 parallel '👉 When we...' questions ➔ Distinction between activity and mindset ➔ Swipe/Save CTA ➔ Exactly 4–6 hashtags (#AcharyaPrashant #ClimateWithin #ClimateChange #Responsibility #Awareness).
+"""
+
     def __init__(self, api_key: str):
         if not api_key:
             raise ValueError("Gemini API Key is required.")
         self.api_key = api_key
 
-    def _upload_video(self, file_path: str) -> Dict[str, Any]:
-        """Upload video file to Gemini File API using resumable protocol."""
+    def _upload_file(self, file_path: str) -> Dict[str, Any]:
+        """Upload any file (video or image) to Gemini File API using resumable protocol."""
         file_size = os.path.getsize(file_path)
         mime_type, _ = mimetypes.guess_type(file_path)
         if not mime_type:
-            mime_type = "video/mp4"
+            mime_type = "application/octet-stream"
 
         display_name = os.path.basename(file_path)
-        logger.info(f"Initiating Gemini upload for '{display_name}' ({file_size / (1024*1024):.2f} MB)...")
+        logger.info(f"Initiating Gemini upload for '{display_name}' ({file_size / (1024*1024):.2f} MB, {mime_type})...")
 
         headers = {
             "X-Goog-Upload-Protocol": "resumable",
@@ -243,8 +289,8 @@ Header: ▶️ *YOUTUBE SHORTS*
         return file_info
 
     def _wait_for_processing(self, file_name: str, max_wait: int = 120):
-        """Poll file state until Gemini has finished audio/video transcoding."""
-        logger.info("Waiting for Gemini to process video frames and audio...")
+        """Poll file state until Gemini has finished media processing."""
+        logger.info("Waiting for Gemini to process uploaded media...")
         start_time = time.time()
         
         clean_name = file_name if not file_name.startswith("files/") else file_name[6:]
@@ -257,16 +303,16 @@ Header: ▶️ *YOUTUBE SHORTS*
             data = res.json()
             state = data.get("state")
             if state == "ACTIVE":
-                logger.info("Video processing complete (ACTIVE).")
+                logger.info("Media processing complete (ACTIVE).")
                 return
             elif state == "FAILED":
-                raise RuntimeError("Gemini failed to process uploaded video.")
-            time.sleep(4)
-        logger.warning("Video processing wait timeout reached, proceeding to prompt.")
+                raise RuntimeError("Gemini failed to process uploaded media.")
+            time.sleep(3)
+        logger.warning("Media processing wait timeout reached, proceeding to prompt.")
 
     def generate_captions(self, video_file_path: str, topic_context: str = "") -> str:
-        """Upload video, invoke Gemini, and return the output text containing ===SPLIT_MSG=== delimiter."""
-        file_info = self._upload_video(video_file_path)
+        """Upload video, invoke Gemini, and return 4 platform blocks separated by ===SPLIT_MSG===."""
+        file_info = self._upload_file(video_file_path)
         file_uri = file_info.get("uri")
         mime_type = file_info.get("mimeType", "video/mp4")
 
@@ -285,7 +331,7 @@ Header: ▶️ *YOUTUBE SHORTS*
                 }
             ],
             "system_instruction": {
-                "parts": [{"text": self.SYSTEM_PROMPT}]
+                "parts": [{"text": self.VIDEO_SYSTEM_PROMPT}]
             },
             "generationConfig": {
                 "temperature": 0.35,
@@ -294,6 +340,44 @@ Header: ▶️ *YOUTUBE SHORTS*
             }
         }
 
+        return self._call_gemini_models(payload)
+
+    def generate_multi_photo_captions(self, image_file_paths: List[str], topic_context: str = "") -> str:
+        """Upload multiple photos, invoke Gemini, and return 3 unified platform blocks separated by ===SPLIT_MSG===."""
+        parts = []
+        for img_path in image_file_paths:
+            file_info = self._upload_file(img_path)
+            file_uri = file_info.get("uri")
+            mime_type = file_info.get("mimeType", "image/jpeg")
+            parts.append({"file_data": {"mime_type": mime_type, "file_uri": file_uri}})
+
+        user_content = f"Analyze these {len(image_file_paths)} photos collectively as a single event/carousel and generate all 3 platform blocks separated by ===SPLIT_MSG===. STRICT ENFORCEMENT: Keep WhatsApp Post strictly under 60 words, Status under 25 words, and Instagram Carousel under 100 words."
+        if topic_context:
+            user_content += f"\nAdditional Topic Context: {topic_context}"
+
+        parts.append({"text": user_content})
+
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": parts
+                }
+            ],
+            "system_instruction": {
+                "parts": [{"text": self.PHOTO_SYSTEM_PROMPT}]
+            },
+            "generationConfig": {
+                "temperature": 0.35,
+                "topP": 0.85,
+                "maxOutputTokens": 2500
+            }
+        }
+
+        return self._call_gemini_models(payload)
+
+    def _call_gemini_models(self, payload: Dict[str, Any]) -> str:
+        """Helper to invoke candidate Gemini models with automatic fallback."""
         last_error = None
         for model in self.CANDIDATE_MODELS:
             generate_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
@@ -301,7 +385,7 @@ Header: ▶️ *YOUTUBE SHORTS*
                 "Content-Type": "application/json",
                 "x-goog-api-key": self.api_key
             }
-            logger.info(f"Attempting caption generation with model '{model}'...")
+            logger.info(f"Attempting generation with model '{model}'...")
             
             try:
                 response = requests.post(generate_url, json=payload, headers=headers, timeout=90)
