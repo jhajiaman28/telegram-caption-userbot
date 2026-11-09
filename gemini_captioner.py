@@ -260,12 +260,13 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         }
         metadata = {"file": {"display_name": display_name}}
         start_res = requests.post(
-            f"{self.UPLOAD_URL}?key={self.api_key}",
+            self.UPLOAD_URL,
             headers=headers,
             json=metadata,
             timeout=30
         )
-        start_res.raise_for_status()
+        if not start_res.ok:
+            raise RuntimeError(f"Gemini upload init failed ({start_res.status_code}): {start_res.text}")
 
         upload_url = start_res.headers.get("X-Goog-Upload-URL")
         if not upload_url:
@@ -278,7 +279,8 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         }
         with open(file_path, "rb") as f:
             finish_res = requests.post(upload_url, headers=upload_headers, data=f, timeout=180)
-            finish_res.raise_for_status()
+            if not finish_res.ok:
+                raise RuntimeError(f"Gemini file upload failed ({finish_res.status_code}): {finish_res.text}")
 
         file_info = finish_res.json().get("file", {})
         file_uri = file_info.get("uri")
@@ -294,12 +296,13 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         start_time = time.time()
         
         clean_name = file_name if not file_name.startswith("files/") else file_name[6:]
-        url = f"{self.FILES_BASE_URL}/files/{clean_name}?key={self.api_key}"
+        url = f"{self.FILES_BASE_URL}/files/{clean_name}"
         headers = {"x-goog-api-key": self.api_key}
 
         while time.time() - start_time < max_wait:
             res = requests.get(url, headers=headers, timeout=30)
-            res.raise_for_status()
+            if not res.ok:
+                raise RuntimeError(f"Gemini file status check failed ({res.status_code}): {res.text}")
             data = res.json()
             state = data.get("state")
             if state == "ACTIVE":
@@ -380,7 +383,7 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         """Helper to invoke candidate Gemini models with automatic fallback."""
         last_error = None
         for model in self.CANDIDATE_MODELS:
-            generate_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+            generate_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             headers = {
                 "Content-Type": "application/json",
                 "x-goog-api-key": self.api_key
