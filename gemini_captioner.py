@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import mimetypes
@@ -10,13 +11,14 @@ logger = logging.getLogger("gemini_captioner")
 
 class GeminiCaptioner:
     """
-    Multimodal Caption Generator using Google Gemini File API & generateContent.
+    Multimodal Caption Generator using Google Gemini API.
     Supports both:
     1. Video Short/Reel Analysis (WhatsApp Post, WA Status, Instagram, YouTube Shorts)
     2. Multi-Photo / Album Analysis (WhatsApp Post, WA Status, Instagram Carousel) on-demand.
     """
     UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    INLINE_MAX_BYTES = 14 * 1024 * 1024  # ~18.6 MB after base64, safely under 20 MB request limit
     
     CANDIDATE_MODELS = [
         "gemini-3.8-flash",
@@ -236,16 +238,25 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
 """
 
     def __init__(self, api_key: str):
-        if not api_key:
+        cleaned_key = (api_key or "").strip().strip('"').strip("'")
+        if not cleaned_key:
             raise ValueError("Gemini API Key is required.")
-        self.api_key = api_key
+        self.api_key = cleaned_key
+
+    def _get_mime_type(self, file_path: str, default_mime: str) -> str:
+        mime_type, _ = mimetypes.guess_type(file_path)
+        return mime_type or default_mime
+
+    def _build_inline_part(self, file_path: str, default_mime: str) -> Dict[str, Any]:
+        mime_type = self._get_mime_type(file_path, default_mime)
+        with open(file_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+        return {"inline_data": {"mime_type": mime_type, "data": encoded}}
 
     def _upload_file(self, file_path: str) -> Dict[str, Any]:
         """Upload any file (video or image) to Gemini File API using resumable protocol."""
         file_size = os.path.getsize(file_path)
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if not mime_type:
-            mime_type = "application/octet-stream"
+        mime_type = self._get_mime_type(file_path, "application/octet-stream")
 
         display_name = os.path.basename(file_path)
         logger.info(f"Initiating Gemini upload for '{display_name}' ({file_size / (1024*1024):.2f} MB, {mime_type})...")
@@ -314,10 +325,19 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         logger.warning("Media processing wait timeout reached, proceeding to prompt.")
 
     def generate_captions(self, video_file_path: str, topic_context: str = "") -> str:
-        """Upload video, invoke Gemini, and return 4 platform blocks separated by ===SPLIT_MSG===."""
-        file_info = self._upload_file(video_file_path)
-        file_uri = file_info.get("uri")
-        mime_type = file_info.get("mimeType", "video/mp4")
+        """Analyze video (inline if <=14 MB, else File API) and return 4 platform blocks."""
+        file_size = os.path.getsize(video_file_path)
+        if file_size <= self.INLINE_MAX_BYTES:
+            logger.info(f"Sending video inline ({file_size / (1024*1024):.2f} MB), bypassing Files API.")
+            media_part = self._build_inline_part(video_file_path, "video/mp4")
+        else:
+            file_info = self._upload_file(video_file_path)
+            media_part = {
+                "file_data": {
+                    "mime_type": file_info.get("mimeType", "video/mp4"),
+                    "file_uri": file_info.get("uri")
+                }
+            }
 
         user_content = "Analyze this video carefully and generate all 4 platform blocks separated by ===SPLIT_MSG===. STRICT ENFORCEMENT: Keep WhatsApp Post strictly under 60 words and WhatsApp Status under 25 words with micro-line spacing."
         if topic_context:
@@ -328,7 +348,7 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
                 {
                     "role": "user",
                     "parts": [
-                        {"file_data": {"mime_type": mime_type, "file_uri": file_uri}},
+                        media_part,
                         {"text": user_content}
                     ]
                 }
@@ -346,13 +366,23 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         return self._call_gemini_models(payload)
 
     def generate_multi_photo_captions(self, image_file_paths: List[str], topic_context: str = "") -> str:
-        """Upload multiple photos, invoke Gemini, and return 3 unified platform blocks separated by ===SPLIT_MSG===."""
+        """Analyze multiple photos (inline if total <=14 MB, else File API) and return 3 blocks."""
+        total_size = sum(os.path.getsize(p) for p in image_file_paths)
         parts = []
-        for img_path in image_file_paths:
-            file_info = self._upload_file(img_path)
-            file_uri = file_info.get("uri")
-            mime_type = file_info.get("mimeType", "image/jpeg")
-            parts.append({"file_data": {"mime_type": mime_type, "file_uri": file_uri}})
+
+        if total_size <= self.INLINE_MAX_BYTES:
+            logger.info(f"Sending {len(image_file_paths)} photos inline ({total_size / (1024*1024):.2f} MB total).")
+            for img_path in image_file_paths:
+                parts.append(self._build_inline_part(img_path, "image/jpeg"))
+        else:
+            for img_path in image_file_paths:
+                file_info = self._upload_file(img_path)
+                parts.append({
+                    "file_data": {
+                        "mime_type": file_info.get("mimeType", "image/jpeg"),
+                        "file_uri": file_info.get("uri")
+                    }
+                })
 
         user_content = f"Analyze these {len(image_file_paths)} photos collectively as a single event/carousel and generate all 3 platform blocks separated by ===SPLIT_MSG===. STRICT ENFORCEMENT: Keep WhatsApp Post strictly under 60 words, Status under 25 words, and Instagram Carousel under 100 words."
         if topic_context:
