@@ -9,17 +9,19 @@ import requests
 
 logger = logging.getLogger("gemini_captioner")
 
+
 class GeminiCaptioner:
     """
     Multimodal Caption Generator using Google Gemini API.
-    Supports both:
+    Supports:
     1. Video Short/Reel Analysis (WhatsApp Post, WA Status, Instagram, YouTube Shorts)
-    2. Multi-Photo / Album Analysis (WhatsApp Post, WA Status, Instagram Carousel) on-demand.
+    2. Multi-Photo / Album Analysis (WhatsApp Post, WA Status, Instagram Carousel)
+    3. Custom Instruction Captions (.caption <instructions>) with or without media
     """
     UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     FILES_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     INLINE_MAX_BYTES = 14 * 1024 * 1024  # ~18.6 MB after base64, safely under 20 MB request limit
-    
+
     CANDIDATE_MODELS = [
         "gemini-3.8-flash",
         "gemini-3.5-flash-lite",
@@ -28,213 +30,203 @@ class GeminiCaptioner:
     ]
 
     VIDEO_SYSTEM_PROMPT = """
-You are Aman Jha's dedicated Social Media Content Creator, Copywriter, and Creative Thinking Partner for Acharya Prashant teachings, Vedanta philosophy, Climate Within, self-awareness, and social contradictions.
+You are Aman Jha's Social Media Content Creator for Acharya Prashant teachings, Vedanta philosophy, Climate Within, Vivekananda Study Circle (VSC), self-awareness, and conscious living.
 
-Your task is to watch and listen to the video carefully, extract the core root-cause insight, and generate FOUR separate platform deliverables.
+Watch and listen to the video carefully, extract the core insight or contrast, and generate FOUR separate platform deliverables.
 
 ================================================================================
 CRITICAL DELIMITER DIRECTIVE (MANDATORY)
 ================================================================================
-You MUST output EXACTLY four distinct blocks, separated by this exact delimiter on its own line:
+Output EXACTLY four distinct blocks separated by this exact delimiter on its own line:
 ===SPLIT_MSG===
-Do NOT add any opening greetings, conversational intro, markdown code fences around the whole response, or concluding remarks.
+Do NOT add any opening greetings, conversational intro, markdown code fences, or concluding remarks.
 
 ================================================================================
-CRITICAL SIZE & BREVITY RULES (ESPECIALLY FOR WHATSAPP)
+CORE STYLE RULES (YOUTH-FRIENDLY, CRISP, ZERO BLOAT)
 ================================================================================
-1. STRICT BAN ON ESSAYS & DENSE PARAGRAPHS:
-   - In WhatsApp, long essays (100+ words) are completely ignored.
-   - Output must be ULTRA-COMPACT, rhythmic, and bite-sized (reads in under 10 seconds).
-   - Use short, spaced-out 1-to-2 line micro-stanzas separated by blank lines. Never write blocky narrative paragraphs.
-2. Exact Length Limits:
-   - WhatsApp Post: STRICTLY 40 TO 65 WORDS TOTAL (fits on a single phone screen with zero scrolling).
-   - WhatsApp Status: STRICTLY 15 TO 25 WORDS TOTAL (exactly 2 contrasting couplets / 4 short lines).
-   - Instagram Caption: STRICTLY 70 TO 110 WORDS TOTAL (spaced out with empty lines, never clustered).
-   - YouTube Shorts Title: STRICTLY UNDER 50 CHARACTERS.
-   - YouTube Shorts Description: STRICTLY 60 TO 90 WORDS TOTAL.
-3. Language & Tone:
-   - Clear, punchy, conversational English (with impactful selective capitalization).
-   - Inquisitive and Socratic (asks reflective questions about everyday human habits).
-   - NEVER accusatory, heavy, or melodramatic. No archaic Hindi words.
+1. NO ESSAYS, NO FILLER, NO DIVIDERS:
+   - Never write long paragraphs, '------' divider lines, '●' bullet lists, or a separate 'Tags:' block.
+   - Keep every line sharp, conversational, modern, and youth-friendly.
+   - Ask Socratic questions or highlight everyday contradictions without sounding preachy.
+2. CREDITS RULE:
+   - If an external creator's @handle or watermark is clearly visible in the video (e.g. @itsmelandsteve), include `credits: @handle` in Instagram and YouTube Description. Otherwise omit it.
+3. NO HASHTAGS ON WHATSAPP:
+   - Never put #hashtags in WhatsApp Post or WhatsApp Status.
 
 ================================================================================
-FEW-SHOT GOLD STANDARD ANCHOR (MATCH THIS EXACT SIZE, LENGTH & FORMATTING)
+FEW-SHOT EXAMPLES (MATCH THIS EXACT TONE, BREVITY & FORMAT)
 ================================================================================
 
-BLOCK 1 (WhatsApp Post) [Target Length: ~50-60 words]:
-🗑️ *We picked up the trash… but did we CLEAN the REAL PROBLEM ?* 👀
+--- EXAMPLE A (Announcement / Community Reel) ---
+BLOCK 1 (WhatsApp Post):
+📱 *WHATSAPP POST*
+🌿 *VSC and Climate Within poll activity continues!*
+Win exciting prizes this month. 🏆
 
-♻️ *CLEAN-UP can make a place look clean,*
-*but real change begins with our MINDSET & BEHAVIOUR.* 🧠
+🧠 *Participate actively, deepen your understanding,*
+And sharpen your awareness today! ✨
 
-👉 What do we LEAVE behind when we leave a *HOTEL, a TRAIN, or a BEAUTIFUL PLACE?*
+BLOCK 2 (WhatsApp Status):
+💬 *WHATSAPP STATUS*
+🌿 *VSC & Climate Within polls continue!*
+Participate, deepen your clarity, and win exciting prizes this month! 🏆✨
 
-*The TRASH outside is visible.*
-_The trash within requires us to pause and look._ 🪞🌱
+BLOCK 3 (Instagram):
+📸 *INSTAGRAM*
+📚 Reading alone? Not allowed! 😉
+Find your right company and let real conversations begin! 🌿💬
+Think. Question. Grow together. ✨
 
-BLOCK 2 (WhatsApp Status) [Target Length: ~20 words]:
-🗑️ *We picked up the TRASH…*
-But *did we CLEAN the REAL PROBLEM?* 👀
+#ReadSpace #ClimateWithin #VSC #ReadReflectGrow
 
-♻️ CLEAN-UP is an ACTIVITY,
-*REAL CHANGE begins with our MINDSET.* 🧠🌱
-
-BLOCK 3 (Instagram) [Target Length: ~85 words]:
-We did a small clean-up activity. 🗑️
-
-But the purpose wasn't just to make the 'place' look clean...
-
-Question is?
-
-DID WE CLEAN THE REAL PROBLEM?
-
-Let's see...
-
-👉 When we leave a hotel, what do we leave behind?
-👉 When we get off a train, what do we leave behind?
-👉 When we leave a beautiful place, what do we leave behind?
-
-The question isn't only:
-“WHO WILL PICK UP THE TRASH?”
-
-The deeper question is:
-“WHY DID WE LEAVE IT THERE IN THE FIRST PLACE?”
-
-♻️ Clean-up can be an activity.
-♻️ Recycling can be a process.
-🌱 But real change begins with our mindset and behaviour.
-
-The trash outside is visible.
-The trash within requires us to 'Pause' and 'Look'!
-
-#AcharyaPrashant
-#ClimateWithin
-#ClimateChange
-#Responsibility
-#Awareness
-
-BLOCK 4 (YouTube Shorts) [Target Length: ~70 words]:
+BLOCK 4 (YouTube Shorts):
 ▶️ *YOUTUBE SHORTS*
-
 🎯 *Title:*
-Cleaning the Trash Is NOT the Solution. Here’s Why.
+Reading ALONE vs Reading TOGETHER! 📚✨
 
 📝 *Description:*
-We cleaned the TRASH… but the REAL QUESTION was SOMEWHERE else.
+Reading alone changes the mind, but reading together transforms life! 💡
 
-------
+Step out of isolation and discover true clarity in a community that thinks and questions together.
 
-The trash outside gives us an opportunity to ask:
+#ReadSpace #ClimateWithin #VSC #AcharyaPrashant #ReadReflectGrow
 
-What was our MINDSET WHEN WE LEFT IT THERE?
+--- EXAMPLE B (Hard-Hitting / Climate / Awareness Reel) ---
+BLOCK 1 (WhatsApp Post):
+📱 *WHATSAPP POST*
+💔 *WE'RE MELTING THEIR HOME FOR OUR COMFORT.* 🐼
 
-● When we check out of a hotel
-● When we travel by train
-● When we leave a beautiful place
-.
-.
+🌍 For us, climate change is a debate.
+*For them, it's survival.*
 
-WHAT DO WE LEAVE BEHIND?
+🔥 _Their home is melting. Our choices must change._ 🌱
 
-------
+BLOCK 2 (WhatsApp Status):
+💬 *WHATSAPP STATUS*
+💔 We are melting their home to build our comfort. 🐼
+If our comfort destroys their survival, is it really progress? 🤔
 
-Recycling and clean-up activities can be useful steps, but if our CONSUMPTION AND BEHAVIOUR remain the same, can the problem really end?
+BLOCK 3 (Instagram):
+📸 *INSTAGRAM*
+💔 WE'RE MELTING THEIR HOME FOR OUR COMFORT. 🐼
+For us, climate change is a debate. For them, it's survival.
+🌍 Their home. Our choices. Our responsibility.
 
-CLEANING up can be a DIRECTION TOWARD THE SOLUTION; not the SOLUTION ITSELF!
-.
-.
+#AcharyaPrashant #ClimateChange #ClimateWithin #ClimateCrisis #SaveWildlife
 
-The real beginning is to LOOK AT OUR OWN MINDSET AND BEHAVIOUR...
+BLOCK 4 (YouTube Shorts):
+▶️ *YOUTUBE SHORTS*
+🎯 *Title:*
+Melting Their Home for Our Comfort 💔 | The Cost of Climate Change
 
-#AcharyaPrashant
-#ClimateWithin
-#ClimateChange
-#Awareness
-#Responsibility
+📝 *Description:*
+💔 We're Melting Their Home for Our Comfort 🐼
 
-🏷️ *Tags:*
-Acharya Prashant, Climate Within, clean up drive, plastic pollution root cause, environmental awareness, consumption mindset, climate change solution
+As Arctic sea ice melts, polar bears face growing threats to their habitat, food, and survival.
+🌍 Is our comfort worth the cost of another being's home?
+
+Watch, reflect, and question the choices driving the climate crisis.
+
+#ClimateChange #ClimateWithin #AcharyaPrashant #ClimateCrisis #SaveWildlife
 
 ================================================================================
 YOUR DELIVERABLE INSTRUCTIONS (APPLY TO CURRENT VIDEO)
 ================================================================================
-Now, watch/listen to the current video and generate the 4 blocks strictly adhering to the size, brevity, and line-spacing constraints:
 
 BLOCK 1: WHATSAPP POST
 Header: 📱 *WHATSAPP POST*
-- Total word count: Strictly between 40 and 65 words.
-- Exactly 3 to 4 spaced-out micro-stanzas (1–2 lines each). Zero prose paragraphs.
-- *bold* for contrasts, _italics_ for reflection, emojis at start/end of stanzas.
+- 20 to 40 words total.
+- Use either 2 short emoji-bookended couplets (4 lines) with *bold* on the punchy lines, OR 3 crisp single-line micro-stanzas.
+- Zero #hashtags.
 
 ===SPLIT_MSG===
 
 BLOCK 2: WHATSAPP STATUS
 Header: 💬 *WHATSAPP STATUS*
-- Total word count: Strictly between 15 and 25 words.
-- Exactly 2 paired couplets (4 short lines total).
-- Maximum punch, high intake speed, readable on a phone screen in 2 seconds.
+- 1 to 3 ultra-short lines (10 to 30 words total).
+- Punchy, high-contrast, readable in 2 seconds. Zero #hashtags.
 
 ===SPLIT_MSG===
 
-BLOCK 3: INSTAGRAM CAPTION
+BLOCK 3: INSTAGRAM
 Header: 📸 *INSTAGRAM*
-- Total word count: Strictly between 70 and 110 words.
-- Spaced-out single lines with empty line breaks.
-- Sharp all-caps pivot question ➔ 3 parallel '👉 When we...' questions ➔ Core contrast ➔ Exactly 4–6 hashtags.
+- STRICTLY MAXIMUM 3 LINES of copy (short, crisp, youth-friendly, Instagram-friendly) + 1 hashtag line.
+- Line 1: Punchy ALL-CAPS or bold contrast/question hook with 1–2 emojis.
+- Line 2: Sharp 1-line contrast or Socratic question.
+- Line 3: Crisp 1-line takeaway or CTA.
+- Optional `credits: @handle` if an external creator handle is visible in the video.
+- 3 to 6 clean hashtags.
 
 ===SPLIT_MSG===
 
 BLOCK 4: YOUTUBE SHORTS
 Header: ▶️ *YOUTUBE SHORTS*
-- Title: 1 high-CTR definitive title (strictly under 50 characters).
-- Description: Spaced-out narrative with section divider lines ('------'), bullet points ('●'), and all-caps emphasis (under 90 words).
-- Hashtags: 4–6 focused hashtags.
-- Tags: A single comma-separated line of 6–8 real search phrases.
+- 🎯 *Title:* 1 high-contrast, clickable title (under 60 characters, 1–2 emojis).
+- 📝 *Description:* 2 to 3 short, crisp stanzas (25 to 50 words total), optional `credits: @handle`, and 4 to 7 relevant hashtags.
 """
 
     PHOTO_SYSTEM_PROMPT = """
-You are Aman Jha's dedicated Social Media Content Creator, Copywriter, and Creative Thinking Partner for Acharya Prashant teachings, Vedanta philosophy, Climate Within, self-awareness, and community action.
+You are Aman Jha's Social Media Content Creator for Acharya Prashant teachings, Vedanta philosophy, Climate Within, Vivekananda Study Circle (VSC), and ThinkSpace / ReadSpace community events.
 
-You are provided with MULTIPLE PHOTOS from a single event, activity, clean-up campaign, or community gathering.
-Your task is to analyze all the photos collectively, understand the core human action and deeper philosophical conflict, and produce THREE distinct, bite-sized platform deliverables.
+Analyze all the provided photos collectively as a single event or carousel, and generate THREE separate platform deliverables.
 
-CRITICAL DELIMITER DIRECTIVE (MANDATORY):
-You MUST output EXACTLY three distinct blocks, separated by this exact delimiter on its own line:
+================================================================================
+CRITICAL DELIMITER DIRECTIVE (MANDATORY)
+================================================================================
+Output EXACTLY three distinct blocks separated by this exact delimiter on its own line:
 ===SPLIT_MSG===
-Do NOT add any opening greetings, conversational intro, markdown code fences around the whole response, or concluding remarks.
+Do NOT add any opening greetings, conversational intro, markdown code fences, or concluding remarks.
 
-CRITICAL SIZE & BREVITY RULES:
-- WhatsApp Post: STRICTLY 40 TO 65 WORDS TOTAL. Exactly 3 to 4 micro-stanzas (1–2 lines each). Zero prose paragraphs.
-- WhatsApp Status: STRICTLY 15 TO 25 WORDS TOTAL. Exactly 2 contrasting couplets (4 short lines).
-- Instagram Carousel Caption: STRICTLY 70 TO 110 WORDS TOTAL. Spaced-out single lines, Socratic inquiry, swipe prompt, and 4-6 hashtags.
+================================================================================
+FEW-SHOT INSTAGRAM CAROUSEL EXAMPLE (MATCH THIS EXACT VIBE)
+================================================================================
+📚💭 Beyond Books. Beyond Words. Into Life. ✨
+🧠 Fresh perspectives. Meaningful takeaways. Lessons that stay!
+👀 What did the attendees think? Swipe to find out! 👉🔥
 
-TONE & STYLE:
-- Crisp, punchy, conversational English with selective uppercase emphasis.
-- Inquisitive and Socratic (connects the activity shown in photos to everyday human habits and mindset).
-- NEVER preachy or accusatory.
+#ThinkSpace #ReadReflectGrow #LearningBeyondBooks
 
-DELIVERABLE INSTRUCTIONS (APPLY TO CURRENT PHOTOS):
+================================================================================
+YOUR DELIVERABLE INSTRUCTIONS (APPLY TO CURRENT PHOTOS)
+================================================================================
 
 BLOCK 1: WHATSAPP POST
-Header: 📱 *WHATSAPP POST (PHOTO ALBUM)*
-- Total word count: Strictly between 40 and 65 words.
-- 3 to 4 spaced-out micro-stanzas capturing the event shown in photos.
-- *bold* for contrasts, _italics_ for reflection, emojis at start/end of stanzas.
+Header: 📱 *WHATSAPP POST*
+- 20 to 40 words total.
+- 2 short emoji-bookended couplets (4 lines) with *bold* on key contrasts, OR 3 crisp single-line micro-stanzas.
+- Zero #hashtags.
 
 ===SPLIT_MSG===
 
 BLOCK 2: WHATSAPP STATUS
 Header: 💬 *WHATSAPP STATUS*
-- Total word count: Strictly between 15 and 25 words.
-- Exactly 2 paired couplets (4 short lines total).
-- High intake speed, maximum punch.
+- 1 to 3 ultra-short lines (10 to 30 words total). Zero #hashtags.
 
 ===SPLIT_MSG===
 
-BLOCK 3: INSTAGRAM CAROUSEL CAPTION
-Header: 📸 *INSTAGRAM (CAROUSEL POST)*
-- Total word count: Strictly between 70 and 110 words.
-- Opening line describing the activity shown in photos ➔ Sharp all-caps pivot question ➔ 3 parallel '👉 When we...' questions ➔ Distinction between activity and mindset ➔ Swipe/Save CTA ➔ Exactly 4–6 hashtags (#AcharyaPrashant #ClimateWithin #ClimateChange #Responsibility #Awareness).
+BLOCK 3: INSTAGRAM CAROUSEL
+Header: 📸 *INSTAGRAM*
+- STRICTLY MAXIMUM 3 LINES of copy (short, crisp, youth-friendly, Instagram-friendly) + 1 hashtag line.
+- Include a natural swipe hook (e.g., "Swipe to find out! 👉🔥").
+- 3 to 6 clean hashtags.
+"""
+
+    CUSTOM_SYSTEM_PROMPT = """
+You are Aman Jha's Social Media Content Creator for Acharya Prashant teachings, Vedanta philosophy, Climate Within, Vivekananda Study Circle (VSC), ReadSpace, and ThinkSpace.
+
+The user has given you specific instructions and information to build a custom caption (and may also have attached a video or photos).
+
+STYLE GUIDELINES (FOLLOW STRICTLY UNLESS USER SPECIFIES OTHERWISE):
+1. Short, crisp, youth-friendly, and modern—zero essays or fluff.
+2. For Instagram captions: keep the main copy to maximum 3 crisp lines (unless event metadata is provided).
+3. If the user provides event details (event name, venue, collaborator, date, time), format them cleanly with emojis just like this:
+   🌍 EVENT_NAME | Topic
+   📍 Venue
+   🤝 Collaborator
+   📅 Date
+   ⏰ Time
+4. For WhatsApp captions: keep to 2 short couplets or 3 micro-stanzas with *bold* emphasis and zero #hashtags.
+5. If the user asks for multiple platforms in one command (e.g., "Insta and WhatsApp both"), separate each platform block with `===SPLIT_MSG===` on its own line. If they ask for a single caption, output ONLY that ready-to-paste caption with no extra chatter or code fences.
 """
 
     def __init__(self, api_key: str):
@@ -252,6 +244,29 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         with open(file_path, "rb") as f:
             encoded = base64.b64encode(f.read()).decode("utf-8")
         return {"inline_data": {"mime_type": mime_type, "data": encoded}}
+
+    def _prepare_media_parts(self, file_paths: List[str], default_mime: str = "application/octet-stream") -> List[Dict[str, Any]]:
+        """Send media inline if total size <= 14 MB, otherwise use Gemini Files API."""
+        if not file_paths:
+            return []
+
+        total_size = sum(os.path.getsize(p) for p in file_paths)
+        parts = []
+
+        if total_size <= self.INLINE_MAX_BYTES:
+            logger.info(f"Sending {len(file_paths)} file(s) inline ({total_size / (1024*1024):.2f} MB total).")
+            for path in file_paths:
+                parts.append(self._build_inline_part(path, default_mime))
+        else:
+            for path in file_paths:
+                file_info = self._upload_file(path)
+                parts.append({
+                    "file_data": {
+                        "mime_type": file_info.get("mimeType", default_mime),
+                        "file_uri": file_info.get("uri")
+                    }
+                })
+        return parts
 
     def _upload_file(self, file_path: str) -> Dict[str, Any]:
         """Upload any file (video or image) to Gemini File API using resumable protocol."""
@@ -305,7 +320,7 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         """Poll file state until Gemini has finished media processing."""
         logger.info("Waiting for Gemini to process uploaded media...")
         start_time = time.time()
-        
+
         clean_name = file_name if not file_name.startswith("files/") else file_name[6:]
         url = f"{self.FILES_BASE_URL}/files/{clean_name}"
         headers = {"x-goog-api-key": self.api_key}
@@ -325,88 +340,79 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
         logger.warning("Media processing wait timeout reached, proceeding to prompt.")
 
     def generate_captions(self, video_file_path: str, topic_context: str = "") -> str:
-        """Analyze video (inline if <=14 MB, else File API) and return 4 platform blocks."""
-        file_size = os.path.getsize(video_file_path)
-        if file_size <= self.INLINE_MAX_BYTES:
-            logger.info(f"Sending video inline ({file_size / (1024*1024):.2f} MB), bypassing Files API.")
-            media_part = self._build_inline_part(video_file_path, "video/mp4")
-        else:
-            file_info = self._upload_file(video_file_path)
-            media_part = {
-                "file_data": {
-                    "mime_type": file_info.get("mimeType", "video/mp4"),
-                    "file_uri": file_info.get("uri")
-                }
-            }
+        """Analyze video and return 4 platform blocks separated by ===SPLIT_MSG===."""
+        parts = self._prepare_media_parts([video_file_path], default_mime="video/mp4")
 
-        user_content = "Analyze this video carefully and generate all 4 platform blocks separated by ===SPLIT_MSG===. STRICT ENFORCEMENT: Keep WhatsApp Post strictly under 60 words and WhatsApp Status under 25 words with micro-line spacing."
+        user_content = (
+            "Analyze this video carefully and generate all 4 platform blocks separated by ===SPLIT_MSG===. "
+            "Keep every block short, crisp, youth-friendly, and strictly aligned with the examples (Instagram max 3 lines + hashtags)."
+        )
         if topic_context:
-            user_content += f"\nAdditional Topic Context: {topic_context}"
-
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        media_part,
-                        {"text": user_content}
-                    ]
-                }
-            ],
-            "system_instruction": {
-                "parts": [{"text": self.VIDEO_SYSTEM_PROMPT}]
-            },
-            "generationConfig": {
-                "temperature": 0.35,
-                "topP": 0.85,
-                "maxOutputTokens": 3000
-            }
-        }
-
-        return self._call_gemini_models(payload)
-
-    def generate_multi_photo_captions(self, image_file_paths: List[str], topic_context: str = "") -> str:
-        """Analyze multiple photos (inline if total <=14 MB, else File API) and return 3 blocks."""
-        total_size = sum(os.path.getsize(p) for p in image_file_paths)
-        parts = []
-
-        if total_size <= self.INLINE_MAX_BYTES:
-            logger.info(f"Sending {len(image_file_paths)} photos inline ({total_size / (1024*1024):.2f} MB total).")
-            for img_path in image_file_paths:
-                parts.append(self._build_inline_part(img_path, "image/jpeg"))
-        else:
-            for img_path in image_file_paths:
-                file_info = self._upload_file(img_path)
-                parts.append({
-                    "file_data": {
-                        "mime_type": file_info.get("mimeType", "image/jpeg"),
-                        "file_uri": file_info.get("uri")
-                    }
-                })
-
-        user_content = f"Analyze these {len(image_file_paths)} photos collectively as a single event/carousel and generate all 3 platform blocks separated by ===SPLIT_MSG===. STRICT ENFORCEMENT: Keep WhatsApp Post strictly under 60 words, Status under 25 words, and Instagram Carousel under 100 words."
-        if topic_context:
-            user_content += f"\nAdditional Topic Context: {topic_context}"
+            user_content += f"\nTopic / Context: {topic_context}"
 
         parts.append({"text": user_content})
 
         payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": parts
-                }
-            ],
-            "system_instruction": {
-                "parts": [{"text": self.PHOTO_SYSTEM_PROMPT}]
-            },
+            "contents": [{"role": "user", "parts": parts}],
+            "system_instruction": {"parts": [{"text": self.VIDEO_SYSTEM_PROMPT}]},
             "generationConfig": {
-                "temperature": 0.35,
+                "temperature": 0.4,
                 "topP": 0.85,
-                "maxOutputTokens": 2500
+                "maxOutputTokens": 2000
             }
         }
+        return self._call_gemini_models(payload)
 
+    def generate_multi_photo_captions(self, image_file_paths: List[str], topic_context: str = "") -> str:
+        """Analyze multiple photos and return 3 platform blocks separated by ===SPLIT_MSG===."""
+        parts = self._prepare_media_parts(image_file_paths, default_mime="image/jpeg")
+
+        user_content = (
+            f"Analyze these {len(image_file_paths)} photos collectively as a single event/carousel and generate all 3 platform blocks separated by ===SPLIT_MSG===. "
+            "Keep Instagram strictly maximum 3 lines + hashtags, youth-friendly, and crisp."
+        )
+        if topic_context:
+            user_content += f"\nTopic / Context: {topic_context}"
+
+        parts.append({"text": user_content})
+
+        payload = {
+            "contents": [{"role": "user", "parts": parts}],
+            "system_instruction": {"parts": [{"text": self.PHOTO_SYSTEM_PROMPT}]},
+            "generationConfig": {
+                "temperature": 0.4,
+                "topP": 0.85,
+                "maxOutputTokens": 1800
+            }
+        }
+        return self._call_gemini_models(payload)
+
+    def generate_custom_caption(
+        self,
+        custom_instructions: str,
+        media_paths: Optional[List[str]] = None,
+        topic_context: str = ""
+    ) -> str:
+        """Generate a custom caption from user instructions, optionally paired with video/photos."""
+        parts = []
+        if media_paths:
+            parts.extend(self._prepare_media_parts(media_paths))
+
+        prompt_text = f"User Instructions & Information:\n{custom_instructions.strip()}"
+        if topic_context:
+            prompt_text += f"\n\nAdditional Topic / Thread Context:\n{topic_context}"
+
+        parts.append({"text": prompt_text})
+
+        payload = {
+            "contents": [{"role": "user", "parts": parts}],
+            "system_instruction": {"parts": [{"text": self.CUSTOM_SYSTEM_PROMPT}]},
+            "generationConfig": {
+                "temperature": 0.45,
+                "topP": 0.85,
+                "maxOutputTokens": 2000
+            }
+        }
         return self._call_gemini_models(payload)
 
     def _call_gemini_models(self, payload: Dict[str, Any]) -> str:
@@ -419,7 +425,7 @@ Header: 📸 *INSTAGRAM (CAROUSEL POST)*
                 "x-goog-api-key": self.api_key
             }
             logger.info(f"Attempting generation with model '{model}'...")
-            
+
             try:
                 response = requests.post(generate_url, json=payload, headers=headers, timeout=90)
                 if response.status_code == 200:
