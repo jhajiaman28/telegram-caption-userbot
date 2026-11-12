@@ -2,6 +2,7 @@ import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import logging
 import os
+import re
 import shutil
 import sys
 import threading
@@ -17,6 +18,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger("userbot")
+
 
 # ------------------------------------------------------------------------------
 # Built-in Lightweight HTTP Healthcheck for Free Cloud Web Services (Render / Koyeb)
@@ -36,6 +38,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+
 def start_health_server():
     port = int(os.getenv("PORT", "8080"))
     try:
@@ -45,6 +48,7 @@ def start_health_server():
         logger.info(f"Healthcheck HTTP server listening on port {port}.")
     except Exception as e:
         logger.warning(f"Could not bind HTTP healthcheck on port {port}: {e}")
+
 
 # ------------------------------------------------------------------------------
 # Userbot Core Logic
@@ -110,7 +114,18 @@ def init_userbot():
             return True
         if msg.media and hasattr(msg.media, "document"):
             doc = msg.media.document
-            if hasattr(doc, "mime_type") and doc.mime_type.startswith("image/"):
+            if hasattr(doc, "mime_type") and (doc.mime_type or "").startswith("image/"):
+                return True
+        return False
+
+    def is_message_video(msg) -> bool:
+        if not msg:
+            return False
+        if msg.video:
+            return True
+        if msg.media and hasattr(msg.media, "document"):
+            doc = msg.media.document
+            if hasattr(doc, "mime_type") and (doc.mime_type or "").startswith("video/"):
                 return True
         return False
 
@@ -133,14 +148,9 @@ def init_userbot():
 
             if not target_video_msg:
                 async for msg in client.iter_messages(chat, reply_to=topic_id, limit=50):
-                    if msg.video:
+                    if is_message_video(msg):
                         target_video_msg = msg
                         break
-                    if msg.media and hasattr(msg.media, "document"):
-                        doc = msg.media.document
-                        if hasattr(doc, "mime_type") and doc.mime_type.startswith("video/"):
-                            target_video_msg = msg
-                            break
 
             if not target_video_msg:
                 logger.warning(f"No video found in topic thread {topic_id}.")
@@ -176,11 +186,7 @@ def init_userbot():
                     )
 
                 raw_captions = captioner.generate_captions(video_path, topic_context=topic_title)
-                
-                if isinstance(raw_captions, str):
-                    caption_blocks = [b.strip() for b in raw_captions.split("===SPLIT_MSG===") if b.strip()]
-                else:
-                    caption_blocks = raw_captions
+                caption_blocks = [b.strip() for b in raw_captions.split("===SPLIT_MSG===") if b.strip()]
 
                 for block in caption_blocks:
                     await client.send_message(
@@ -246,11 +252,7 @@ def init_userbot():
                 )
 
             raw_captions = captioner.generate_multi_photo_captions(downloaded_paths, topic_context=topic_title)
-            
-            if isinstance(raw_captions, str):
-                caption_blocks = [b.strip() for b in raw_captions.split("===SPLIT_MSG===") if b.strip()]
-            else:
-                caption_blocks = raw_captions
+            caption_blocks = [b.strip() for b in raw_captions.split("===SPLIT_MSG===") if b.strip()]
 
             reply_target_id = photo_messages[0].id
             for block in caption_blocks:
@@ -278,19 +280,105 @@ def init_userbot():
                 except Exception:
                     pass
 
+    async def process_custom_caption(event, custom_instructions: str):
+        chat = await event.get_chat()
+        topic_id = None
+        if event.message.reply_to:
+            topic_id = getattr(event.message.reply_to, "reply_to_top_id", None) or getattr(event.message.reply_to, "reply_to_msg_id", None)
+
+        reply_target_id = event.message.id
+        topic_title = await get_topic_title(chat, topic_id) if topic_id else ""
+
+        temp_folder = os.path.join(config.download_dir, f"custom_{int(time.time())}_{event.message.id}")
+        downloaded_paths = []
+        status_msg = None
+
+        try:
+            status_msg = await client.send_message(
+                chat,
+                "✍️ <b>Drafting custom caption...</b>",
+                parse_mode="html",
+                reply_to=reply_target_id
+            )
+
+            reply_msg = await event.get_reply_message()
+            context_parts = []
+            if topic_title:
+                context_parts.append(f"Topic Title: {topic_title}")
+
+            if reply_msg:
+                if reply_msg.text:
+                    context_parts.append(f"Replied Message Text: {reply_msg.text}")
+
+                # Check if replied message is a video
+                if is_message_video(reply_msg):
+                    os.makedirs(temp_folder, exist_ok=True)
+                    await status_msg.edit("📥 <b>Downloading video for custom caption...</b>", parse_mode="html")
+                    v_path = await client.download_media(reply_msg, file=temp_folder)
+                    if v_path and os.path.exists(v_path):
+                        downloaded_paths.append(v_path)
+
+                # Check if replied message is a photo or part of an album
+                elif is_message_image(reply_msg):
+                    os.makedirs(temp_folder, exist_ok=True)
+                    await status_msg.edit("📥 <b>Downloading photo(s) for custom caption...</b>", parse_mode="html")
+                    photo_msgs = []
+                    if getattr(reply_msg, "grouped_id", None):
+                        target_gid = reply_msg.grouped_id
+                        search_kwargs = {"reply_to": topic_id} if topic_id else {}
+                        async for m in client.iter_messages(chat, limit=30, **search_kwargs):
+                            if getattr(m, "grouped_id", None) == target_gid and is_message_image(m):
+                                photo_msgs.append(m)
+                        photo_msgs.reverse()
+                    if not photo_msgs:
+                        photo_msgs = [reply_msg]
+
+                    for pm in photo_msgs:
+                        p_path = await client.download_media(pm, file=temp_folder)
+                        if p_path and os.path.exists(p_path):
+                            downloaded_paths.append(p_path)
+
+            await status_msg.edit("🧠 <b>Generating custom caption with Gemini AI...</b>", parse_mode="html")
+            combined_context = "\n".join(context_parts)
+            raw_output = captioner.generate_custom_caption(
+                custom_instructions=custom_instructions,
+                media_paths=downloaded_paths or None,
+                topic_context=combined_context
+            )
+
+            blocks = [b.strip() for b in raw_output.split("===SPLIT_MSG===") if b.strip()]
+            if not blocks:
+                blocks = [raw_output.strip()]
+
+            for block in blocks:
+                await client.send_message(
+                    chat,
+                    block,
+                    reply_to=reply_target_id
+                )
+                await asyncio.sleep(0.5)
+
+            if status_msg:
+                await status_msg.delete()
+            logger.info(f"Successfully generated {len(blocks)} custom caption block(s)!")
+
+        except Exception as e:
+            logger.error(f"Error generating custom caption: {e}", exc_info=True)
+            if status_msg:
+                await status_msg.edit(f"❌ <b>Custom Caption Failed:</b>\n<code>{e}</code>", parse_mode="html")
+        finally:
+            if os.path.exists(temp_folder):
+                try:
+                    shutil.rmtree(temp_folder)
+                except Exception:
+                    pass
+
     # --------------------------------------------------------------------------
     # Event 1: NewMessage Listener (Video Upload + Topic Rename)
     # --------------------------------------------------------------------------
     @client.on(events.NewMessage)
     async def message_handler(event):
-        is_video = bool(
-            event.message.video or (
-                event.message.media and hasattr(event.message.media, "document") and
-                getattr(event.message.media.document, "mime_type", "").startswith("video/")
-            )
-        )
-
-        if is_video and event.message.reply_to:
+        if is_message_video(event.message) and event.message.reply_to:
             topic_id = getattr(event.message.reply_to, "reply_to_top_id", None) or getattr(event.message.reply_to, "reply_to_msg_id", None)
             if topic_id:
                 chat = await event.get_chat()
@@ -319,7 +407,7 @@ def init_userbot():
     # --------------------------------------------------------------------------
     # Event 2: Manual Command (.final / /final) for Single Video
     # --------------------------------------------------------------------------
-    @client.on(events.NewMessage(pattern=r"(?i)^[./]final"))
+    @client.on(events.NewMessage(pattern=r"(?i)^[./]final(?:\s|$)"))
     async def manual_trigger(event):
         chat = await event.get_chat()
         topic_id = None
@@ -346,8 +434,7 @@ def init_userbot():
             topic_id = getattr(event.message, "reply_to_msg_id", None) or event.message.id
 
         logger.info(f"Manual .photos command triggered in topic {topic_id}")
-        
-        # Immediate status acknowledgment so Telegram is never silent
+
         ack_msg = await client.send_message(
             chat,
             "🔍 <b>Searching for photos in this topic...</b>",
@@ -360,13 +447,11 @@ def init_userbot():
             reply_msg = await event.get_reply_message()
             photo_messages = []
 
-            # 1. If replying directly to an album with a grouped_id, collect all photos with that grouped_id
             if reply_msg and getattr(reply_msg, "grouped_id", None):
                 target_gid = reply_msg.grouped_id
                 async for m in client.iter_messages(chat, reply_to=topic_id, limit=40):
                     if getattr(m, "grouped_id", None) == target_gid and is_message_image(m):
                         photo_messages.append(m)
-            # 2. If replying directly to a single photo
             elif reply_msg and is_message_image(reply_msg):
                 photo_messages.append(reply_msg)
                 async for m in client.iter_messages(chat, reply_to=topic_id, limit=20):
@@ -374,7 +459,6 @@ def init_userbot():
                         photo_messages.append(m)
                     if len(photo_messages) >= 10:
                         break
-            # 3. If sent standalone in the topic thread, collect recent photos
             else:
                 async for m in client.iter_messages(chat, reply_to=topic_id, limit=40):
                     if is_message_image(m):
@@ -390,20 +474,44 @@ def init_userbot():
                 return
 
             await ack_msg.delete()
-            photo_messages.reverse()  # Chronological order
+            photo_messages.reverse()
             asyncio.create_task(process_topic_photos(chat, topic_id, topic_title, photo_messages))
 
         except Exception as e:
             logger.error(f"Error in manual_photos_trigger: {e}", exc_info=True)
             await ack_msg.edit(f"❌ <b>Error:</b> <code>{e}</code>", parse_mode="html")
 
+    # --------------------------------------------------------------------------
+    # Event 4: Custom Instruction Command (.caption / /caption / .cap)
+    # --------------------------------------------------------------------------
+    @client.on(events.NewMessage(pattern=r"(?is)^[./](?:caption|cap)(?:\s+(.*))?$"))
+    async def custom_caption_trigger(event):
+        raw_text = event.raw_text or ""
+        match = re.match(r"(?is)^[./](?:caption|cap)(?:\s+(.*))?$", raw_text)
+        instructions = (match.group(1) or "").strip() if match else ""
+
+        if not instructions:
+            await client.send_message(
+                await event.get_chat(),
+                "⚠️ <b>Usage:</b> Write your instructions after <code>.caption</code>\n"
+                "Example: <code>.caption Insta caption for ReadSpace on 1 Nov, 3-5 PM at Sanjay Van, collab with Forest Dept</code>\n"
+                "<i>(You can also reply to a video, photo, or album with this command.)</i>",
+                parse_mode="html",
+                reply_to=event.message.id
+            )
+            return
+
+        logger.info("Custom .caption command triggered.")
+        asyncio.create_task(process_custom_caption(event, instructions))
+
     return client
 
+
 if __name__ == "__main__":
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🚀 Telegram Userbot (Render Free Web Service Ready)")
-    print("="*60)
+    print("=" * 60)
     userbot = init_userbot()
     userbot.start()
-    print("\n🟢 Userbot is ONLINE and listening 24/7 for [Final] topics & .photos...")
+    print("\n🟢 Userbot is ONLINE and listening 24/7 for [Final] topics, .photos & .caption...")
     userbot.run_until_disconnected()
