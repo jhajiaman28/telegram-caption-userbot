@@ -48,9 +48,12 @@ CORE STYLE RULES (YOUTH-FRIENDLY, CRISP, ZERO BLOAT)
    - Never write long paragraphs, '------' divider lines, '●' bullet lists, or a separate 'Tags:' block.
    - Keep every line sharp, conversational, modern, and youth-friendly.
    - Ask Socratic questions or highlight everyday contradictions without sounding preachy.
-2. CREDITS RULE:
+2. STRICTLY BANNED PHRASES & CLICHÉS:
+   - NEVER use generic, preachy clichés such as "reflect the truth", "find the truth", "see the truth", "know the truth", "discover the truth", or "meet your real self".
+   - Express ideas through concrete, relatable everyday actions, sharp contrasts, and grounded questions instead of abstract "truth" slogans.
+3. CREDITS RULE:
    - If an external creator's @handle or watermark is clearly visible in the video (e.g. @itsmelandsteve), include `credits: @handle` in Instagram and YouTube Description. Otherwise omit it.
-3. NO HASHTAGS ON WHATSAPP:
+4. NO HASHTAGS ON WHATSAPP:
    - Never put #hashtags in WhatsApp Post or WhatsApp Status.
 
 ================================================================================
@@ -178,6 +181,12 @@ Output EXACTLY three distinct blocks separated by this exact delimiter on its ow
 Do NOT add any opening greetings, conversational intro, markdown code fences, or concluding remarks.
 
 ================================================================================
+STRICTLY BANNED PHRASES & CLICHÉS
+================================================================================
+- NEVER use generic, preachy clichés such as "reflect the truth", "find the truth", "see the truth", "know the truth", "discover the truth", or "meet your real self".
+- Keep every line grounded in concrete actions, curiosity, and real human reflection.
+
+================================================================================
 FEW-SHOT INSTAGRAM CAROUSEL EXAMPLE (MATCH THIS EXACT VIBE)
 ================================================================================
 📚💭 Beyond Books. Beyond Words. Into Life. ✨
@@ -218,15 +227,16 @@ The user has given you specific instructions and information to build a custom c
 
 STYLE GUIDELINES (FOLLOW STRICTLY UNLESS USER SPECIFIES OTHERWISE):
 1. Short, crisp, youth-friendly, and modern—zero essays or fluff.
-2. For Instagram captions: keep the main copy to maximum 3 crisp lines (unless event metadata is provided).
-3. If the user provides event details (event name, venue, collaborator, date, time), format them cleanly with emojis just like this:
+2. STRICTLY BANNED PHRASES: NEVER use generic clichés like "reflect the truth", "find the truth", "see the truth", "know the truth", "discover the truth", or "meet your real self". Use concrete, relatable phrasing instead.
+3. For Instagram captions: keep the main copy to maximum 3 crisp lines (unless event metadata is provided).
+4. If the user provides event details (event name, venue, collaborator, date, time), format them cleanly with emojis just like this:
    🌍 EVENT_NAME | Topic
    📍 Venue
    🤝 Collaborator
    📅 Date
    ⏰ Time
-4. For WhatsApp captions: keep to 2 short couplets or 3 micro-stanzas with *bold* emphasis and zero #hashtags.
-5. If the user asks for multiple platforms in one command (e.g., "Insta and WhatsApp both"), separate each platform block with `===SPLIT_MSG===` on its own line. If they ask for a single caption, output ONLY that ready-to-paste caption with no extra chatter or code fences.
+5. For WhatsApp captions: keep to 2 short couplets or 3 micro-stanzas with *bold* emphasis and zero #hashtags.
+6. If the user asks for multiple platforms in one command (e.g., "Insta and WhatsApp both"), separate each platform block with `===SPLIT_MSG===` on its own line. If they ask for a single caption, output ONLY that ready-to-paste caption with no extra chatter or code fences.
 """
 
     def __init__(self, api_key: str):
@@ -345,7 +355,8 @@ STYLE GUIDELINES (FOLLOW STRICTLY UNLESS USER SPECIFIES OTHERWISE):
 
         user_content = (
             "Analyze this video carefully and generate all 4 platform blocks separated by ===SPLIT_MSG===. "
-            "Keep every block short, crisp, youth-friendly, and strictly aligned with the examples (Instagram max 3 lines + hashtags)."
+            "Keep every block short, crisp, youth-friendly, and strictly aligned with the examples (Instagram max 3 lines + hashtags). "
+            "Do NOT use clichés like 'reflect the truth', 'find the truth', or 'see the truth'."
         )
         if topic_context:
             user_content += f"\nTopic / Context: {topic_context}"
@@ -369,7 +380,8 @@ STYLE GUIDELINES (FOLLOW STRICTLY UNLESS USER SPECIFIES OTHERWISE):
 
         user_content = (
             f"Analyze these {len(image_file_paths)} photos collectively as a single event/carousel and generate all 3 platform blocks separated by ===SPLIT_MSG===. "
-            "Keep Instagram strictly maximum 3 lines + hashtags, youth-friendly, and crisp."
+            "Keep Instagram strictly maximum 3 lines + hashtags, youth-friendly, and crisp. "
+            "Do NOT use clichés like 'reflect the truth', 'find the truth', or 'see the truth'."
         )
         if topic_context:
             user_content += f"\nTopic / Context: {topic_context}"
