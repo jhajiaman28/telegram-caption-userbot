@@ -23,10 +23,10 @@ class GeminiCaptioner:
     INLINE_MAX_BYTES = 14 * 1024 * 1024  # ~18.6 MB after base64, safely under 20 MB request limit
 
     CANDIDATE_MODELS = [
+        ​"gemini-4-hydrogen",
         "gemini-3.8-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-pro-preview",
-        "gemini-3-flash"
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite"
     ]
 
     VIDEO_SYSTEM_PROMPT = """
