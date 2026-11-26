@@ -250,28 +250,26 @@ DECISION RULE (CRITICAL):
 NO_RECIPE
 
 OUTPUT FORMAT (WHEN A RECIPE OR FOOD DISH IS DETECTED):
-Output ONLY the dish header and ingredient bullets in this exact format, with NO intro, NO cooking steps, NO outro, and NO markdown code fences:
+Output ONLY the dish header and ingredient bullets in this exact bilingual format, with NO intro, NO cooking steps, NO outro, and NO markdown code fences:
 
 <DISH NAME IN UPPERCASE> — INGREDIENTS
 
-• <Hindi Name> (<English Name>): <Quantity> (<Optional short prep/detail note in Hindi>)
+• <Hindi Name> (<English Name>): <Hindi Quantity & Prep> (<English Quantity & Prep>)
 
 EXACT REFERENCE EXAMPLE:
-VEGAN GAJAR KA HALWA — INGREDIENTS
+VEGAN CASHEW COFFEE — INGREDIENTS
 
-• गाजर (Grated Carrots): 1.5–2 कटोरी (2–3 मध्यम, कद्दूकस की हुई)
-• नारियल का तेल (Coconut Oil): 2 tsp
-• छोटी इलायची (Green Cardamom): 2–3 (कुटी हुई)
-• चीनी (Sugar): 3–4 tsp या ¼ कटोरी (स्वादानुसार)
-• वीगन खोया (Soya Milk Khoya): ½ कटोरी (क्रम्बल किया हुआ)
-• ड्राई फ्रूट्स (Chopped Dry Fruits): 2–3 tsp (बारीक कटे काजू-बादाम)
+• काजू (Cashews): 1 छोटी कटोरी, भीगोए हुए (1 small bowl, soaked)
+• पानी (Water): आवश्यकतानुसार (As required)
+• चीनी (Sugar): स्वादानुसार (As per taste)
+• कॉफ़ी पाउडर (Coffee Powder): 1-2 छोटे चम्मच (1-2 tsp)
 
 RULES:
 1. First line must be `<DISH NAME IN UPPERCASE> — INGREDIENTS` followed by one blank line.
-2. Every ingredient line must start with `• ` followed by `<Hindi Name> (<English Name>): <Quantity>`.
-3. Add a short Hindi prep/quantity note in parentheses at the end only when helpful (e.g. `(कुटी हुई)`, `(स्वादानुसार)`, `(बारीक कटे काजू-बादाम)`).
-4. Use simple, everyday Hindi words (e.g. कटोरी, स्वादानुसार) and standard English units like `tsp`, `tbsp`, `cup`, `ml`, `g` when appropriate.
-5. Never invent ingredients that are not shown or mentioned in the media/text. If exact quantities are not stated, give reasonable observed estimates only when clearly visible, or state `स्वादानुसार` / `आवश्यकतानुसार`.
+2. Every ingredient line must start with `• ` followed by `<Hindi Name> (<English Name>): <Hindi Quantity & Prep> (<English Quantity & Prep>)`.
+3. BOTH the ingredient name AND the quantity/prep must include Hindi followed by English in parentheses (for example: `1-2 छोटे चम्मच (1-2 tsp)`, `आवश्यकतानुसार (As required)`, `स्वादानुसार (As per taste)`, `1 छोटी कटोरी, भीगोए हुए (1 small bowl, soaked)`).
+4. Use simple, everyday Hindi words (e.g. कटोरी, छोटे चम्मच, स्वादानुसार, आवश्यकतानुसार) paired with clear, concise English equivalents in parentheses.
+5. Never invent ingredients that are not shown or mentioned in the media/text. If exact quantities are not stated, give reasonable observed estimates only when clearly visible, or state `स्वादानुसार (As per taste)` / `आवश्यकतानुसार (As required)`.
 """
 
     def __init__(self, api_key: str):
@@ -474,13 +472,15 @@ RULES:
         if force:
             prompt_text = (
                 "The user explicitly requested the ingredients list for this food/recipe message. "
-                "Extract every identifiable dish ingredient from the attached media and/or text in the exact required format. "
+                "Extract every identifiable dish ingredient from the attached media and/or text in the exact bilingual format "
+                "(Hindi Name (English Name): Hindi Quantity & Prep (English Quantity & Prep)). "
                 "Output NO_RECIPE only if there is genuinely no food or dish present at all."
             )
         else:
             prompt_text = (
                 "Inspect the attached media (video, photo, or audio) and any accompanying text. "
-                "If it presents a food recipe or dish, extract the ingredients list in the exact required format. "
+                "If it presents a food recipe or dish, extract the ingredients list in the exact bilingual format "
+                "(Hindi Name (English Name): Hindi Quantity & Prep (English Quantity & Prep)). "
                 "If it is NOT a recipe or food preparation, output strictly NO_RECIPE."
             )
 
