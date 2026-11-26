@@ -186,8 +186,16 @@ def init_userbot():
         temp_folder = os.path.join(config.download_dir, f"recipe_{int(time.time())}_{msg.id}")
         os.makedirs(temp_folder, exist_ok=True)
         downloaded_paths = []
+        status_msg = None
 
         try:
+            status_msg = await client.send_message(
+                chat,
+                "👀 <b>Received! Checking for recipe &amp; ingredients...</b>",
+                parse_mode="html",
+                reply_to=msg.id
+            )
+
             media_messages = [msg]
             if grouped_id:
                 album_msgs = []
@@ -209,7 +217,15 @@ def init_userbot():
                     downloaded_paths.append(path)
 
             if not downloaded_paths:
+                if status_msg:
+                    await status_msg.delete()
                 return
+
+            if status_msg:
+                await status_msg.edit(
+                    "🧠 <b>Analyzing recipe &amp; extracting ingredients...</b>",
+                    parse_mode="html"
+                )
 
             ingredients = captioner.generate_recipe_ingredients(
                 media_paths=downloaded_paths,
@@ -222,12 +238,21 @@ def init_userbot():
                     ingredients,
                     reply_to=msg.id
                 )
+                if status_msg:
+                    await status_msg.delete()
                 logger.info(f"Replied with recipe ingredients for message {msg.id} in chat {event.chat_id}.")
             else:
+                if status_msg:
+                    await status_msg.delete()
                 logger.info(f"No recipe detected in message {msg.id} from target chat. Staying silent.")
 
         except Exception as e:
             logger.error(f"Silent recipe handler error for message {msg.id}: {e}", exc_info=True)
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
         finally:
             if os.path.exists(temp_folder):
                 try:
@@ -239,6 +264,7 @@ def init_userbot():
         chat = await event.get_chat()
         temp_folder = os.path.join(config.download_dir, f"manual_ing_{int(time.time())}_{reply_msg.id}")
         downloaded_paths = []
+        status_msg = None
 
         try:
             await event.delete()
@@ -246,6 +272,13 @@ def init_userbot():
             pass
 
         try:
+            status_msg = await client.send_message(
+                chat,
+                "⏳ <b>Checking recipe &amp; extracting ingredients...</b>",
+                parse_mode="html",
+                reply_to=reply_msg.id
+            )
+
             media_messages = []
             grouped_id = getattr(reply_msg, "grouped_id", None)
 
@@ -264,6 +297,7 @@ def init_userbot():
 
             if media_messages:
                 os.makedirs(temp_folder, exist_ok=True)
+                await status_msg.edit("📥 <b>Downloading media for recipe...</b>", parse_mode="html")
                 for m in media_messages:
                     path = await client.download_media(m, file=temp_folder)
                     if path and os.path.exists(path):
@@ -278,8 +312,10 @@ def init_userbot():
 
             if not downloaded_paths and not caption_text:
                 logger.warning("Manual .ing triggered on an empty message.")
+                await status_msg.edit("⚠️ <b>No media or text found in the replied message.</b>", parse_mode="html")
                 return
 
+            await status_msg.edit("🧠 <b>Extracting ingredients with Gemini AI...</b>", parse_mode="html")
             ingredients = captioner.generate_recipe_ingredients(
                 media_paths=downloaded_paths or None,
                 caption_text=caption_text,
@@ -291,12 +327,19 @@ def init_userbot():
                     ingredients,
                     reply_to=reply_msg.id
                 )
+                await status_msg.delete()
                 logger.info(f"Manual .ing replied to message {reply_msg.id} in chat {event.chat_id}.")
             else:
+                await status_msg.edit("⚠️ <b>No recipe or ingredients found in this message.</b>", parse_mode="html")
                 logger.info(f"Manual .ing found no recipe/ingredients in message {reply_msg.id}.")
 
         except Exception as e:
             logger.error(f"Manual .ing error for message {reply_msg.id}: {e}", exc_info=True)
+            if status_msg:
+                try:
+                    await status_msg.edit(f"❌ <b>Ingredient Extraction Failed:</b>\n<code>{e}</code>", parse_mode="html")
+                except Exception:
+                    pass
         finally:
             if os.path.exists(temp_folder):
                 try:
